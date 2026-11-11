@@ -14,8 +14,8 @@ export type JoinBody = z.input<typeof joinBodySchema>
 export const renameBodySchema = z.object({ displayName: displayNameSchema.nullable() })
 
 /**
- * Instantánea de la sesión para el invitado (docs/DISENO.md §4.1). Crece por etapas:
- * votos y tiempo real en E4, reproducción en E5.
+ * Instantánea de la sesión para el invitado (docs/DISENO.md §4.1). Se envía al cargar y al
+ * conectarse por SSE; la reproducción se agrega en E5.
  */
 export const sessionSnapshotSchema = z.object({
   session: z.object({
@@ -24,7 +24,14 @@ export const sessionSnapshotSchema = z.object({
     name: z.string(),
     status: z.enum(['active', 'ended']),
   }),
-  me: z.object({ participantId: z.string(), name: z.string() }).nullable(),
+  me: z
+    .object({
+      participantId: z.string(),
+      name: z.string(),
+      /** Canciones pendientes que este invitado votó (su botón aparece marcado). */
+      votedTrackIds: z.array(z.string()),
+    })
+    .nullable(),
   /** R-COLA-03: versión de la cola. */
   version: z.number().int().nonnegative(),
   /** Pendientes en orden (R-COLA-01). */

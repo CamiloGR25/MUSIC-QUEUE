@@ -1,12 +1,11 @@
-import type { SessionSnapshot, TrackView } from '@musica/shared'
+import type { SessionSnapshot } from '@musica/shared'
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Button } from '../../components/button.tsx'
 import { TextField } from '../../components/text-field.tsx'
 import { ApiRequestError, errorMessage } from '../../lib/api-client.ts'
-import { QueueList } from '../queue/queue-list.tsx'
-import { SearchSheet } from '../search/search-sheet.tsx'
 import { guestApi } from './guest-api.ts'
+import { GuestSession, type Update } from './guest-session.tsx'
 
 type State =
   | { kind: 'loading' }
@@ -15,30 +14,27 @@ type State =
   | { kind: 'ready'; snapshot: SessionSnapshot }
 
 /**
- * Pantalla del invitado (docs/DISENO.md §9.5): entra sin cuenta, con apodo opcional, busca y
- * agrega canciones y ve la cola. Votar y el tiempo real llegan en E4; la música, en E5.
+ * Pantalla del invitado (docs/DISENO.md §9.5): entra sin cuenta, con apodo opcional, busca,
+ * agrega y vota canciones, y ve la cola en vivo. La música llega en E5.
  */
 export function GuestPage() {
   const { code = '' } = useParams()
   const navigate = useNavigate()
   const [state, setState] = useState<State>({ kind: 'loading' })
 
-  const show = useCallback(
-    (snapshot: SessionSnapshot) => {
-      // R-SES-03: si el anfitrión rotó el enlace, quien ya estaba dentro pasa al código nuevo.
-      if (snapshot.session.code !== code) {
-        void navigate(`/s/${snapshot.session.code}`, { replace: true })
-      }
-      setState({ kind: 'ready', snapshot })
-    },
-    [code, navigate],
+  const update: Update = useCallback(
+    (change) =>
+      setState((current) =>
+        current.kind === 'ready' ? { kind: 'ready', snapshot: change(current.snapshot) } : current,
+      ),
+    [],
   )
 
   useEffect(() => {
     const controller = new AbortController()
     guestApi
       .snapshot(code, controller.signal)
-      .then(show)
+      .then((snapshot) => setState({ kind: 'ready', snapshot }))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         if (error instanceof ApiRequestError && error.code === 'SESSION_NOT_FOUND') {
@@ -48,7 +44,13 @@ export function GuestPage() {
         }
       })
     return () => controller.abort()
-  }, [code, show])
+  }, [code])
+
+  // R-SES-03: si el anfitrión rotó el enlace, quien ya estaba dentro pasa al código nuevo.
+  const currentCode = state.kind === 'ready' ? state.snapshot.session.code : code
+  useEffect(() => {
+    if (currentCode !== code) void navigate(`/s/${currentCode}`, { replace: true })
+  }, [currentCode, code, navigate])
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-8 px-4 py-10">
@@ -61,7 +63,14 @@ export function GuestPage() {
       {state.kind === 'error' && (
         <Message title="No pudimos cargar la sesión">{state.message}</Message>
       )}
-      {state.kind === 'ready' && <Ready snapshot={state.snapshot} code={code} onChange={show} />}
+      {state.kind === 'ready' && (
+        <Ready
+          snapshot={state.snapshot}
+          code={code}
+          update={update}
+          onLost={() => setState({ kind: 'not-found' })}
+        />
+      )}
     </main>
   )
 }
@@ -69,73 +78,37 @@ export function GuestPage() {
 function Ready({
   snapshot,
   code,
-  onChange,
+  update,
+  onLost,
 }: {
   snapshot: SessionSnapshot
   code: string
-  onChange: (snapshot: SessionSnapshot) => void
+  update: Update
+  onLost: () => void
 }) {
-  const [searching, setSearching] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!notice) return
-    const timer = setTimeout(() => setNotice(null), 4000)
-    return () => clearTimeout(timer)
-  }, [notice])
-
   if (snapshot.session.status === 'ended') {
     return <Message title="La sesión terminó">Gracias por la música.</Message>
   }
-  if (!snapshot.me) return <Join snapshot={snapshot} code={code} onJoined={onChange} />
-
-  const added = async (track: TrackView) => {
-    setSearching(false)
-    setNotice(`Agregaste ${track.name}. Tu voto ya cuenta.`)
-    // Hasta E4 (tiempo real) la cola se actualiza al agregar o al recargar.
-    onChange(await guestApi.snapshot(snapshot.session.code))
-  }
-
+  const me = snapshot.me
+  if (!me) return <Join snapshot={snapshot} code={code} onJoined={(next) => update(() => next)} />
   return (
-    <>
-      <header className="flex flex-col gap-3">
-        <h1 className="text-sesion leading-tight font-bold">{snapshot.session.name}</h1>
-        <MyName
-          code={snapshot.session.code}
-          name={snapshot.me.name}
-          onRenamed={(name) => onChange({ ...snapshot, me: { ...snapshot.me!, name } })}
-        />
-      </header>
-
-      <p role="status" className="min-h-6 text-hoja">
-        {notice}
-      </p>
-
-      <section className="flex flex-col gap-2" aria-labelledby="cola">
-        <h2 id="cola" className="text-titulo font-bold">
-          Cola
-        </h2>
-        <QueueList queue={snapshot.queue} />
-      </section>
-
-      <p className="pb-24 text-meta text-arena">Canciones y portadas de Spotify.</p>
-
-      <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-noche via-noche/95 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="mx-auto w-full max-w-md">
-          <Button className="w-full" onClick={() => setSearching(true)}>
-            + Añadir canción
-          </Button>
-        </div>
-      </div>
-
-      {searching && (
-        <SearchSheet
-          code={snapshot.session.code}
-          onAdded={(track) => void added(track)}
-          onClose={() => setSearching(false)}
-        />
-      )}
-    </>
+    <GuestSession
+      snapshot={snapshot}
+      update={update}
+      onLost={onLost}
+      header={
+        <header className="flex flex-col gap-3">
+          <h1 className="text-sesion leading-tight font-bold">{snapshot.session.name}</h1>
+          <MyName
+            code={snapshot.session.code}
+            name={me.name}
+            onRenamed={(name) =>
+              update((current) => ({ ...current, me: current.me && { ...current.me, name } }))
+            }
+          />
+        </header>
+      }
+    />
   )
 }
 

@@ -1,6 +1,6 @@
 import { hostMeSchema, hostSessionSchema } from '@musica/shared'
 import { z } from 'zod'
-import { getJson, postJson } from '../../lib/api-client.ts'
+import { getJson, postJson, sendJson } from '../../lib/api-client.ts'
 
 /** Inicia el OAuth con Spotify: es una navegación completa, no una llamada fetch. */
 export const SPOTIFY_LOGIN_URL = '/api/auth/spotify/login'
@@ -12,6 +12,10 @@ export const hostApi = {
   createSession: (name: string) => postJson('/host/sessions', { name }, hostSessionSchema),
   endSession: (id: string) => postJson(`/host/sessions/${id}/end`, {}, hostSessionSchema),
   rotateCode: (id: string) => postJson(`/host/sessions/${id}/rotate-code`, {}, hostSessionSchema),
+  /** R-CAN-06: quitar una canción pendiente. */
+  removeTrack: (sessionId: string, trackId: string) =>
+    sendJson('DELETE', `/host/sessions/${sessionId}/tracks/${trackId}`, {}, nothing),
+  eventsUrl: (sessionId: string) => `/api/host/sessions/${sessionId}/events`,
   logout: () => postJson('/auth/logout', {}, nothing),
   disconnect: () => postJson('/auth/spotify/disconnect', {}, nothing),
 }

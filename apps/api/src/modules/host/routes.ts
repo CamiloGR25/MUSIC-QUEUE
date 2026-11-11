@@ -1,18 +1,33 @@
-import { createSessionBodySchema, type HostMe, type HostSession } from '@musica/shared'
+import {
+  createSessionBodySchema,
+  type HostMe,
+  type HostSession,
+  type HostSnapshot,
+} from '@musica/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { AppError } from '../../lib/errors.ts'
+import type { SseConnections } from '../../lib/sse.ts'
 import { parseWith } from '../../lib/validation.ts'
 import { HOST_COOKIE_MAX_AGE_MS } from '../host-auth/cookies.ts'
 import { fixedJoinUrl } from '../fixed-qr/routes.ts'
 import { currentHost, registerHostGuard } from '../host-auth/host-guard.ts'
 import type { HostAuthDeps } from '../host-auth/routes.ts'
 import type { KeepAwake } from '../keep-awake/keep-awake.ts'
+import type { EventBus } from '../realtime/event-bus.ts'
+import type { Notifier } from '../realtime/notifier.ts'
 import type { SessionState, SessionStore } from '../sessions/store.ts'
 
-type HostDeps = HostAuthDeps & { sessions: SessionStore; keepAwake: KeepAwake }
+type HostDeps = HostAuthDeps & {
+  sessions: SessionStore
+  keepAwake: KeepAwake
+  bus: EventBus
+  notify: Notifier
+  sse: SseConnections
+}
 
 const sessionParamsSchema = z.object({ id: z.uuid() })
+const trackParamsSchema = z.object({ id: z.uuid(), trackId: z.uuid() })
 
 export function toHostSession(session: SessionState, guestBaseUrl: string): HostSession {
   return {
@@ -29,7 +44,7 @@ export function toHostSession(session: SessionState, guestBaseUrl: string): Host
 
 /** Panel del anfitrión (docs/DISENO.md §4.3). Todas las rutas exigen la cookie del anfitrión. */
 export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<void> {
-  const { config, tokens, sessions, keepAwake } = deps
+  const { config, tokens, sessions, keepAwake, bus, notify, sse } = deps
   registerHostGuard(app, deps)
   const view = (session: SessionState) => toHostSession(session, config.guestBaseUrl)
 
@@ -96,6 +111,7 @@ export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<
     ownSession(id, host.spotifyId)
     const ended = sessions.end(id)
     keepAwake.stop()
+    notify.session(id)
     request.log.info({ sessionId: id }, 'Sesión finalizada')
     return view(ended)
   })
@@ -106,7 +122,37 @@ export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<
     const { id } = parseWith(sessionParamsSchema, request.params)
     ownSession(id, host.spotifyId)
     const rotated = sessions.rotateCode(id)
+    notify.session(id)
     request.log.info({ sessionId: id }, 'Enlace rotado')
     return view(rotated)
+  })
+
+  const hostSnapshot = (session: SessionState): HostSnapshot => ({
+    session: view(session),
+    ...notify.queuePayload(session.id)!,
+  })
+
+  app.get('/host/sessions/:id', async (request) => {
+    const { id } = parseWith(sessionParamsSchema, request.params)
+    return hostSnapshot(ownSession(id, currentHost(request).spotifyId))
+  })
+
+  /** Canal en vivo del panel (docs/DISENO.md §5): cola, invitados y estado de la sesión. */
+  app.get('/host/sessions/:id/events', async (request, reply) => {
+    const { id } = parseWith(sessionParamsSchema, request.params)
+    const session = ownSession(id, currentHost(request).spotifyId)
+    const stream = sse.start(request, reply)
+    stream.send('snapshot', hostSnapshot(session))
+    stream.onClose(bus.subscribe(session.id, (event) => stream.send(event.name, event.data)))
+  })
+
+  /** R-CAN-06: quitar una canción pendiente. */
+  app.delete('/host/sessions/:id/tracks/:trackId', async (request, reply) => {
+    const { id, trackId } = parseWith(trackParamsSchema, request.params)
+    ownSession(id, currentHost(request).spotifyId)
+    sessions.removeTrack(id, trackId)
+    notify.queue(id)
+    request.log.info({ sessionId: id, trackId }, 'Canción quitada por el anfitrión')
+    return reply.status(204).send()
   })
 }

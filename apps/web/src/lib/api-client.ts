@@ -42,7 +42,7 @@ export async function getJson<T>(path: string, schema: z.ZodType<T>, signal?: Ab
 
 /** Mutación con cuerpo JSON (el servidor exige JSON y el mismo origen, docs/DISENO.md §8). */
 export async function sendJson<T>(
-  method: 'POST' | 'PATCH',
+  method: 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   path: string,
   body: unknown,
   schema: z.ZodType<T>,

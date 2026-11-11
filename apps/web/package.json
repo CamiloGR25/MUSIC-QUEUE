@@ -12,6 +12,8 @@
   "dependencies": {
     "@fontsource-variable/familjen-grotesk": "^5.3.0",
     "@musica/shared": "^0.0.0",
+    "lucide-react": "^1.72.0",
+    "motion": "^14.12.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

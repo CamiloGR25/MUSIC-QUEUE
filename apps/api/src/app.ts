@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { AppConfig } from './config/env.ts'
 import { registerOriginCheck } from './lib/csrf.ts'
+import { SseConnections } from './lib/sse.ts'
 import { notFoundBody, registerErrorHandling } from './lib/errors.ts'
 import { hostAuthRoutes } from './modules/host-auth/routes.ts'
 import { HostTokenStore } from './modules/host-auth/token-store.ts'
@@ -12,6 +13,8 @@ import { fixedQrRoutes } from './modules/fixed-qr/routes.ts'
 import { guestRoutes } from './modules/guests/routes.ts'
 import { hostRoutes } from './modules/host/routes.ts'
 import { KeepAwake } from './modules/keep-awake/keep-awake.ts'
+import { EventBus } from './modules/realtime/event-bus.ts'
+import { Notifier } from './modules/realtime/notifier.ts'
 import { MemoryStore, type SessionStore } from './modules/sessions/store.ts'
 import { HttpSpotifyAccounts, type SpotifyAccounts } from './providers/spotify/accounts.ts'
 import { HttpSpotifyCatalog, type SpotifyCatalog } from './providers/spotify/catalog.ts'
@@ -32,6 +35,8 @@ export type AppServices = {
   tokens: HostTokenStore
   sessions: SessionStore
   keepAwake: KeepAwake
+  bus: EventBus
+  sse: SseConnections
 }
 
 /** Barrido de sesiones vencidas (docs/DISENO.md §2.3). */
@@ -63,9 +68,13 @@ export async function buildApp(
 
   const spotifyAccounts = accounts ?? new HttpSpotifyAccounts(config.spotify)
   const spotifyCatalog = catalog ?? new HttpSpotifyCatalog(config.spotify)
+  const sessions = new MemoryStore(now, config.sessionTtlHours)
+  const bus = new EventBus()
   const services: AppServices = {
     tokens: new HostTokenStore(spotifyAccounts, now),
-    sessions: new MemoryStore(now, config.sessionTtlHours),
+    sessions,
+    bus,
+    sse: new SseConnections(),
     keepAwake: new KeepAwake({
       ...config.keepAwake,
       timeZone: config.timezone,
@@ -92,29 +101,27 @@ export async function buildApp(
   app.decorateRequest('hostAuth', null)
 
   const deps = { config, accounts: spotifyAccounts, tokens: services.tokens, now }
-  await app.register(healthRoutes, { prefix: '/api' })
-  await app.register((scope) => hostAuthRoutes(scope, deps), { prefix: '/api' })
+  const live = { bus, notify: new Notifier(sessions, bus), sse: services.sse }
+  const api = { prefix: '/api' }
+  await app.register(healthRoutes, api)
+  await app.register((scope) => hostAuthRoutes(scope, deps), api)
   await app.register(
-    (scope) =>
-      hostRoutes(scope, { ...deps, sessions: services.sessions, keepAwake: services.keepAwake }),
-    { prefix: '/api' },
+    (scope) => hostRoutes(scope, { ...deps, ...live, sessions, keepAwake: services.keepAwake }),
+    api,
   )
   await app.register(
-    (scope) => guestRoutes(scope, { config, sessions: services.sessions, catalog: spotifyCatalog }),
-    {
-      prefix: '/api',
-    },
+    (scope) => guestRoutes(scope, { ...live, config, sessions, catalog: spotifyCatalog }),
+    api,
   )
-
-  await app.register((scope) => fixedQrRoutes(scope, { config, sessions: services.sessions }), {
-    prefix: '/api',
-  })
+  await app.register((scope) => fixedQrRoutes(scope, { config, sessions }), api)
 
   const sweeper = setInterval(() => {
     const removed = services.sessions.sweep()
     if (removed > 0) app.log.info({ removed }, 'Sesiones vencidas borradas')
   }, SWEEP_INTERVAL_MS)
   sweeper.unref()
+  // Las conexiones SSE se cierran antes de apagar; si no, el servidor esperaría por ellas.
+  app.addHook('preClose', async () => services.sse.closeAll())
   app.addHook('onClose', async () => {
     clearInterval(sweeper)
     services.keepAwake.stop()

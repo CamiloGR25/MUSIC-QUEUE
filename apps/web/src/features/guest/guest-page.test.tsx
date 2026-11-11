@@ -1,5 +1,5 @@
 import type { SessionSnapshot } from '@musica/shared'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
@@ -45,9 +45,12 @@ describe('GuestPage', () => {
     const fetchMock = stubApi((url, init) => {
       if (url === `/api/sessions/${CODE}`) return Response.json(snapshot())
       if (init?.method === 'POST') {
-        return Response.json(snapshot({ me: { participantId: 'p1', name: 'Tía Marta' } }), {
-          status: 201,
-        })
+        return Response.json(
+          snapshot({ me: { participantId: 'p1', name: 'Tía Marta', votedTrackIds: [] } }),
+          {
+            status: 201,
+          },
+        )
       }
       return undefined
     })
@@ -65,7 +68,11 @@ describe('GuestPage', () => {
   })
 
   it('quien ya entró ve la sesión sin volver a entrar', async () => {
-    stubApi(() => Response.json(snapshot({ me: { participantId: 'p1', name: 'Invitado 4' } })))
+    stubApi(() =>
+      Response.json(
+        snapshot({ me: { participantId: 'p1', name: 'Invitado 4', votedTrackIds: [] } }),
+      ),
+    )
     renderAt()
     expect(await screen.findByText('Invitado 4')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Entrar' })).not.toBeInTheDocument()
@@ -74,7 +81,9 @@ describe('GuestPage', () => {
   it('cambia el nombre', async () => {
     stubApi((_url, init) => {
       if (init?.method === 'PATCH') return Response.json({ name: 'Abuela' })
-      return Response.json(snapshot({ me: { participantId: 'p1', name: 'Invitado 1' } }))
+      return Response.json(
+        snapshot({ me: { participantId: 'p1', name: 'Invitado 1', votedTrackIds: [] } }),
+      )
     })
     renderAt()
     await userEvent.click(await screen.findByRole('button', { name: 'Cambiar nombre' }))
@@ -109,13 +118,13 @@ describe('GuestPage', () => {
       Response.json(
         snapshot({
           session: { code: 'ABCDEFGH12', name: 'Fiesta', status: 'active' },
-          me: { participantId: 'p1', name: 'Pipe' },
+          me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [] },
         }),
       ),
     )
     renderAt()
     expect(await screen.findByText('Pipe')).toBeInTheDocument()
-    expect(screen.getByTestId('location')).toHaveTextContent('/s/ABCDEFGH12')
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/s/ABCDEFGH12'))
   })
 })
 
@@ -135,7 +144,7 @@ const track = (n: number, votes = 1) => ({
 })
 
 describe('cola y buscador en la pantalla del invitado', () => {
-  const inside = { participantId: 'p1', name: 'Pipe' }
+  const inside = { participantId: 'p1', name: 'Pipe', votedTrackIds: [] }
 
   it('muestra la cola en orden con posición, quién la pidió, duración y votos', async () => {
     stubApi(() => Response.json(snapshot({ me: inside, queue: [track(1, 3), track(2, 1)] })))
@@ -144,12 +153,11 @@ describe('cola y buscador en la pantalla del invitado', () => {
     expect(rows[0]).toHaveTextContent('1')
     expect(rows[0]).toHaveTextContent('Canción 1')
     expect(rows[0]).toHaveTextContent('La pidió Tía Marta, 3:35')
-    expect(screen.getByLabelText('3 votos')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Votar por Canción 1, 3 votos' })).toBeInTheDocument()
     expect(screen.getByLabelText('Explícita')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Canción 1' })).toHaveAttribute(
-      'href',
-      'https://open.spotify.com/track/1',
-    )
+    // El nombre no es enlace: tocarlo no saca a nadie de la app al querer votar.
+    expect(screen.queryByRole('link', { name: 'Canción 1' })).not.toBeInTheDocument()
+    expect(screen.getByText(/la que tenga más votos suena primero/)).toBeInTheDocument()
   })
 
   it('con la cola vacía invita a pedir la primera', async () => {
@@ -177,16 +185,21 @@ describe('cola y buscador en la pantalla del invitado', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Canción 5/ }))
     // Confirmación con los datos antes de agregar.
     expect(screen.getByRole('dialog')).toHaveTextContent('Álbum 5')
+    // El enlace a Spotify (política de Spotify) queda en la confirmación.
+    expect(screen.getByRole('link', { name: 'Abrir en Spotify' })).toHaveAttribute(
+      'href',
+      'https://open.spotify.com/track/5',
+    )
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
 
     expect(await screen.findByText('Agregaste Canción 5. Tu voto ya cuenta.')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(await screen.findByRole('link', { name: 'Canción 5' })).toBeInTheDocument()
+    expect(await screen.findByText('Canción 5')).toBeInTheDocument()
     const post = fetchMock.mock.calls.find(([u]) => u.endsWith('/tracks'))
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ spotifyTrackId: result.spotifyTrackId })
   })
 
-  it('las canciones que ya están en la cola no se pueden elegir', async () => {
+  it('"Ya en la cola" cierra el buscador y muestra la canción para votarla', async () => {
     stubApi((url) => {
       if (url.includes('/search?')) {
         return Response.json({
@@ -194,14 +207,14 @@ describe('cola y buscador en la pantalla del invitado', () => {
           nextOffset: null,
         })
       }
-      return Response.json(snapshot({ me: inside }))
+      return Response.json(snapshot({ me: inside, queue: [track(1)] }))
     })
     renderAt()
     await userEvent.click(await screen.findByRole('button', { name: '+ Añadir canción' }))
     await userEvent.type(screen.getByLabelText('Buscar canción, artista o álbum'), 'cancion')
-    const row = await screen.findByRole('button', { name: /Canción 1/ })
-    expect(row).toBeDisabled()
-    expect(row).toHaveTextContent('Ya en la cola')
+    await userEvent.click(await screen.findByRole('button', { name: /Ya en la cola/ }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(document.getElementById('track-t1')).toHaveClass('bg-hoja/15')
   })
 
   it('si alguien la pidió justo antes, avisa que ya está en la cola', async () => {

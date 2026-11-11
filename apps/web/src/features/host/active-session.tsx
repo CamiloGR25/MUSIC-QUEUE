@@ -1,9 +1,19 @@
-import type { HostSession } from '@musica/shared'
+import {
+  hostSnapshotSchema,
+  type HostSession,
+  participantsUpdatedSchema,
+  queueUpdatedSchema,
+  sessionUpdatedSchema,
+  type TrackView,
+} from '@musica/shared'
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/button.tsx'
 import { QrCode } from '../../components/qr-code.tsx'
 import { errorMessage } from '../../lib/api-client.ts'
+import { useEventStream } from '../../lib/use-event-stream.ts'
+import { QueueList } from '../queue/queue-list.tsx'
 import { hostApi } from './host-api.ts'
+import { RemoveTrackButton } from './remove-track-button.tsx'
 
 type Pending = 'end' | 'rotate' | null
 
@@ -18,7 +28,10 @@ const CONFIRM: Record<'end' | 'rotate', { text: string; action: string }> = {
   },
 }
 
-/** Sesión activa en el panel: QR, enlace, invitados, rotar y finalizar (docs/DISENO.md §9.5). */
+/**
+ * Sesión activa en el panel (docs/DISENO.md §9.5): QR, enlace, rotar y finalizar, y en vivo por
+ * SSE el número de invitados y la cola, con la opción de quitar canciones (R-CAN-06).
+ */
 export function ActiveSession({
   session,
   keepAwakeUntil,
@@ -32,8 +45,41 @@ export function ActiveSession({
   const [copied, setCopied] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [live, setLive] = useState<{ version: number; queue: TrackView[]; guests: number }>({
+    version: -1,
+    queue: [],
+    guests: session.participantsCount,
+  })
 
   useEffect(() => setCopied(false), [session.joinUrl])
+
+  useEventStream(hostApi.eventsUrl(session.id), {
+    snapshot: (data) => {
+      const snap = hostSnapshotSchema.parse(data)
+      setLive({ version: snap.version, queue: snap.queue, guests: snap.session.participantsCount })
+    },
+    'queue.updated': (data) => {
+      const { version, queue } = queueUpdatedSchema.parse(data)
+      setLive((current) => (version > current.version ? { ...current, version, queue } : current))
+    },
+    'participants.updated': (data) => {
+      const { count } = participantsUpdatedSchema.parse(data)
+      setLive((current) => ({ ...current, guests: count }))
+    },
+    // Rotar o finalizar (también desde otra pestaña): se recarga el panel.
+    'session.updated': (data) => {
+      const updated = sessionUpdatedSchema.parse(data)
+      if (updated.status === 'ended' || updated.code !== session.code) onChange()
+    },
+  })
+
+  const remove = async (track: TrackView) => {
+    try {
+      await hostApi.removeTrack(session.id, track.id)
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }
 
   const copy = async () => {
     await navigator.clipboard.writeText(session.joinUrl)
@@ -51,7 +97,7 @@ export function ActiveSession({
     }
   }
 
-  const guests = session.participantsCount
+  const guests = live.guests
 
   return (
     <section className="flex flex-col gap-6 rounded-3xl bg-mesa p-6">
@@ -117,6 +163,18 @@ export function ActiveSession({
           </Button>
         </div>
       )}
+
+      <div className="flex flex-col gap-2">
+        <h3 className="text-titulo font-bold">
+          Cola{live.queue.length > 0 ? ` (${live.queue.length})` : ''}
+        </h3>
+        <QueueList
+          queue={live.queue}
+          action={(track) => (
+            <RemoveTrackButton track={track} onRemove={() => void remove(track)} />
+          )}
+        />
+      </div>
 
       {fullscreen && <FullscreenQr session={session} onClose={() => setFullscreen(false)} />}
     </section>

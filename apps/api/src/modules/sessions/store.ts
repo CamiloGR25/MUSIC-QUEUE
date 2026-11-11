@@ -86,6 +86,20 @@ export interface SessionStore {
   activeTrackId(sessionId: string, spotifyTrackId: string): string | undefined
   /** Pendientes en orden de la cola (R-COLA-01). */
   queue(sessionId: string): RankedTrack[]
+  /**
+   * R-VOT-01/03/04: pone o quita el voto de un participante. Idempotente: repetir no cambia nada.
+   * Devuelve los votos de la canción y si la cola cambió.
+   */
+  setVote(
+    sessionId: string,
+    trackId: string,
+    participantId: string,
+    voted: boolean,
+  ): { votes: number; changed: boolean }
+  /** Canciones pendientes que votó el participante (para marcar su botón). */
+  votedTrackIds(sessionId: string, participantId: string): string[]
+  /** R-CAN-06: el anfitrión quita una canción pendiente. */
+  removeTrack(sessionId: string, trackId: string): Track
   /** Borra sesiones vencidas (§2.3) y devuelve cuántas borró. */
   sweep(): number
 }
@@ -251,6 +265,42 @@ export class MemoryStore implements SessionStore {
     return rankQueue(pending).map((track, index) => ({ ...track, position: index + 1 }))
   }
 
+  setVote(sessionId: string, trackId: string, participantId: string, voted: boolean) {
+    const session = this.activeSession(sessionId)
+    if (!session.participants.has(participantId)) {
+      throw new AppError(401, 'NOT_PARTICIPANT', 'Entra a la sesión para pedir canciones.')
+    }
+    const track = this.pendingTrack(session, trackId)
+    const voters = session.votes.get(track.id)!
+    const before = voters.size
+    if (voted) voters.add(participantId)
+    else voters.delete(participantId)
+    const changed = voters.size !== before
+    if (changed) session.queueVersion += 1
+    return { votes: voters.size, changed }
+  }
+
+  votedTrackIds(sessionId: string, participantId: string): string[] {
+    const session = this.sessions.get(sessionId)
+    if (!session) return []
+    return [...session.votes]
+      .filter(
+        ([trackId, voters]) =>
+          voters.has(participantId) && session.tracks.get(trackId)?.status === 'pending',
+      )
+      .map(([trackId]) => trackId)
+  }
+
+  removeTrack(sessionId: string, trackId: string): Track {
+    const session = this.activeSession(sessionId)
+    const track = this.pendingTrack(session, trackId)
+    track.status = 'removed'
+    session.activeBySpotifyId.delete(track.spotifyTrackId)
+    session.votes.delete(track.id)
+    session.queueVersion += 1
+    return track
+  }
+
   sweep(): number {
     const now = this.now()
     let removed = 0
@@ -275,6 +325,20 @@ export class MemoryStore implements SessionStore {
       throw new AppError(409, 'SESSION_ENDED', 'La sesión terminó.')
     }
     return session
+  }
+
+  /** R-VOT-04: solo las pendientes admiten votos o cambios. */
+  private pendingTrack(session: SessionState, trackId: string): Track {
+    const track = session.tracks.get(trackId)
+    if (!track) throw new AppError(404, 'TRACK_NOT_FOUND', 'Esa canción ya no está en la cola.')
+    if (track.status !== 'pending') {
+      throw new AppError(
+        409,
+        'TRACK_NOT_VOTABLE',
+        'Esa canción ya va a sonar; los votos se cerraron.',
+      )
+    }
+    return track
   }
 
   private uniqueCode(): string {

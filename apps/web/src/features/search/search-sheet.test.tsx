@@ -25,7 +25,9 @@ afterEach(() => vi.useRealTimers())
 
 function renderSheet() {
   const onClose = vi.fn()
-  render(<SearchSheet code="K7M2P9QX4D" onAdded={vi.fn()} onClose={onClose} />)
+  render(
+    <SearchSheet code="K7M2P9QX4D" onAdded={vi.fn()} onShowInQueue={vi.fn()} onClose={onClose} />,
+  )
   return { onClose, input: screen.getByLabelText('Buscar canción, artista o álbum') }
 }
 

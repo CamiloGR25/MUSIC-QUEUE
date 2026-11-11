@@ -23,10 +23,13 @@ type Results =
 export function SearchSheet({
   code,
   onAdded,
+  onShowInQueue,
   onClose,
 }: {
   code: string
   onAdded: (track: TrackView) => void
+  /** "Ya en la cola": cierra el buscador y muestra esa canción para votarla. */
+  onShowInQueue: (trackId: string) => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState('')
@@ -126,7 +129,9 @@ export function SearchSheet({
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
               <ResultsView
                 results={results}
-                onSelect={setSelected}
+                onSelect={(track) =>
+                  track.inQueue ? onShowInQueue(track.inQueue.trackId) : setSelected(track)
+                }
                 onRetry={() => setAttempt((n) => n + 1)}
               />
               {results.kind === 'ready' && results.nextOffset !== null && (
@@ -194,8 +199,7 @@ function ResultsView({
         <li key={track.spotifyTrackId}>
           <button
             type="button"
-            className="flex w-full items-center gap-3 py-3 text-left disabled:cursor-default"
-            disabled={track.inQueue !== null}
+            className="flex w-full items-center gap-3 py-3 text-left"
             onClick={() => onSelect(track)}
           >
             <TrackCover src={track.imageUrl} alt={`Portada de ${track.album}`} />
@@ -209,7 +213,7 @@ function ResultsView({
             </span>
             <span className="flex shrink-0 flex-col items-end gap-1 text-meta">
               <span className="text-arena tabular">{formatDuration(track.durationMs)}</span>
-              {track.inQueue && <span className="text-hoja">Ya en la cola</span>}
+              {track.inQueue && <span className="text-hoja">Ya en la cola, votar</span>}
             </span>
           </button>
         </li>
@@ -261,6 +265,15 @@ function Confirm({
         </p>
         <p className="text-meta text-arena">{track.album}</p>
         <p className="text-arena tabular">{formatDuration(track.durationMs)}</p>
+        {/* Enlace a Spotify que exige su política; aquí, donde se mira la canción a propósito. */}
+        <a
+          href={track.spotifyUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 text-meta text-arena underline hover:text-crema"
+        >
+          Abrir en Spotify
+        </a>
       </div>
       {error && <p className="text-alerta">{error}</p>}
       <div className="flex w-full gap-3">

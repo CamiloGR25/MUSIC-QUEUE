@@ -1,4 +1,9 @@
-import { addTrackResponseSchema, searchResponseSchema, sessionSnapshotSchema } from '@musica/shared'
+import {
+  addTrackResponseSchema,
+  searchResponseSchema,
+  sessionSnapshotSchema,
+  voteResponseSchema,
+} from '@musica/shared'
 import { z } from 'zod'
 import { getJson, postJson, sendJson } from '../../lib/api-client.ts'
 
@@ -20,4 +25,13 @@ export const guestApi = {
     ),
   addTrack: (code: string, spotifyTrackId: string) =>
     postJson(`${path(code)}/tracks`, { spotifyTrackId }, addTrackResponseSchema),
+  /** R-VOT-01/03: PUT vota, DELETE quita el voto. */
+  vote: (code: string, trackId: string, voted: boolean) =>
+    sendJson(
+      voted ? 'PUT' : 'DELETE',
+      `${path(code)}/tracks/${trackId}/vote`,
+      {},
+      voteResponseSchema,
+    ),
+  eventsUrl: (code: string) => `/api${path(code)}/events`,
 }

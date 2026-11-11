@@ -1,8 +1,9 @@
 import type { HostMe } from '@musica/shared'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
+import { FakeEventSource } from '../../test/fake-event-source.ts'
 import { reconnectWarning } from './host-api.ts'
 import { HostPage } from './host-page.tsx'
 
@@ -188,5 +189,64 @@ describe('QR para imprimir (D-21)', () => {
     expect(await screen.findByAltText('QR fijo para entrar a la fiesta')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Imprimir' }))
     expect(print).toHaveBeenCalled()
+  })
+})
+
+describe('panel en vivo (SSE)', () => {
+  const track = {
+    id: '6f1b0f1e-0000-4000-8000-0000000000a1',
+    spotifyTrackId: 'sp000000000000000000a1',
+    spotifyUrl: 'https://open.spotify.com/track/a1',
+    name: 'La gota fría',
+    artist: 'Carlos Vives',
+    album: 'Clásicos',
+    imageUrl: null,
+    durationMs: 272_000,
+    explicit: false,
+    votes: 3,
+    addedBy: 'Tía Marta',
+    position: 1,
+  }
+
+  async function renderLive(route?: (url: string, init?: RequestInit) => Response | undefined) {
+    const fetchMock = stubApi(
+      (url, init) => route?.(url, init) ?? Response.json(me({ activeSession: session })),
+    )
+    renderAt()
+    await screen.findByText('Sesión activa')
+    await waitFor(() => expect(FakeEventSource.instances).not.toHaveLength(0))
+    const source = FakeEventSource.latest()
+    act(() => {
+      source.open()
+      source.emit('snapshot', {
+        session: { ...session, participantsCount: 2 },
+        version: 1,
+        queue: [track],
+      })
+    })
+    return { source, fetchMock }
+  }
+
+  it('se conecta al canal del panel y muestra la cola y los invitados', async () => {
+    const { source } = await renderLive()
+    expect(source.url).toBe(`/api/host/sessions/${session.id}/events`)
+    expect(screen.getByText('2 invitados')).toBeInTheDocument()
+    expect(screen.getByText('La gota fría')).toBeInTheDocument()
+    act(() => source.emit('participants.updated', { count: 5 }))
+    expect(screen.getByText('5 invitados')).toBeInTheDocument()
+  })
+
+  it('quita una canción después de confirmar', async () => {
+    const { source, fetchMock } = await renderLive((_url, init) =>
+      init?.method === 'DELETE' ? new Response(null, { status: 204 }) : undefined,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Quitar La gota fría de la cola' }))
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
+    await userEvent.click(screen.getByRole('button', { name: 'Sí, quitar' }))
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE')
+    expect(call?.[0]).toBe(`/api/host/sessions/${session.id}/tracks/${track.id}`)
+    // El servidor avisa por SSE que la cola cambió.
+    act(() => source.emit('queue.updated', { version: 2, queue: [] }))
+    expect(screen.getByText('Todavía no hay canciones. Pide la primera.')).toBeInTheDocument()
   })
 })
