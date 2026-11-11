@@ -1,0 +1,45 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/familjen-grotesk';
+
+/* Identidad "patio de noche en familia" (docs/DISENO.md §9, D-15). */
+@theme {
+  --color-noche: #1b1612;
+  --color-mesa: #28211b;
+  --color-mesa-alta: #352c24;
+  --color-crema: #f4eadb;
+  --color-arena: #bfae9a;
+  --color-hoja: #62d08e;
+  --color-hoja-tinta: #0f2a1b;
+  --color-bombillo: #f5b83d;
+  --color-alerta: #ff8a70;
+
+  --font-sans: 'Familjen Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+
+  /* Escala 1,25 sobre 16 px: 13 · 16 · 20 · 25 · 31 · 39 */
+  --text-meta: 0.8125rem;
+  --text-cuerpo: 1rem;
+  --text-titulo: 1.25rem;
+  --text-seccion: 1.5625rem;
+  --text-sesion: 1.9375rem;
+  --text-grande: 2.4375rem;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-noche font-sans text-cuerpo text-crema antialiased;
+    min-height: 100dvh;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-hoja;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}

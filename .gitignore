@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Secretos: nunca se suben (repositorio público)
+.env
+.env.*
+!.env.example

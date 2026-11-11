@@ -1,0 +1,36 @@
+{
+  "name": "musica-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Cola musical colaborativa para eventos privados: los invitados piden y votan canciones desde el celular con un QR.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c green,yellow \"npm run dev -w @musica/api\" \"npm run dev -w @musica/web\"",
+    "build": "npm run build -w @musica/web && npm run build -w @musica/api",
+    "start": "npm run start -w @musica/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "oxlint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "concurrently": "^10.0.7",
+    "oxlint": "^1.93.0",
+    "prettier": "^3.10.0",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "typescript": "~7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
