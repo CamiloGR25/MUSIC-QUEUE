@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
-import { App } from './app.tsx'
+import { HomePage } from './home-page.tsx'
 
 function stubFetch(response: Response | Error) {
   const fetchMock = vi.fn(() =>
@@ -10,10 +11,14 @@ function stubFetch(response: Response | Error) {
   return fetchMock
 }
 
-describe('App (E0)', () => {
+describe('HomePage', () => {
   it('muestra "Servidor listo." cuando la API responde', async () => {
     const fetchMock = stubFetch(Response.json({ ok: true, uptimeSec: 3 }))
-    render(<App />)
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    )
     expect(screen.getByRole('heading', { name: 'Cola musical' })).toBeInTheDocument()
     expect(await screen.findByText('Servidor listo.')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/health', expect.anything())
@@ -21,7 +26,11 @@ describe('App (E0)', () => {
 
   it('avisa cuando el servidor no responde', async () => {
     stubFetch(new TypeError('Failed to fetch'))
-    render(<App />)
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    )
     expect(await screen.findByText(/El servidor no responde/)).toBeInTheDocument()
   })
 })

@@ -11,7 +11,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss()],
     server: {
       // 127.0.0.1 y no localhost: Spotify solo acepta esa URL de retorno (docs/DISENO.md §6).
-      host: '127.0.0.1',
+      // Con GUEST_BASE_URL (celulares en el mismo Wi-Fi) escucha también en la red local.
+      host: env.GUEST_BASE_URL ? '0.0.0.0' : '127.0.0.1',
       port: 5180,
       strictPort: true,
       proxy: {

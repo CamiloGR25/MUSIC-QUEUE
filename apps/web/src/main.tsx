@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './app/app.tsx'
+import { RouterProvider } from 'react-router'
+import { router } from './app/router.tsx'
 import './styles/index.css'
 
 const root = document.getElementById('root')
@@ -8,6 +9,6 @@ if (!root) throw new Error('Falta el elemento #root')
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <RouterProvider router={router} />
   </StrictMode>,
 )

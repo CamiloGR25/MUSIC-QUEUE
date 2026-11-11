@@ -1,14 +1,15 @@
 import { healthResponseSchema } from '@musica/shared'
 import { useEffect, useState } from 'react'
-import { getJson } from '../lib/api-client.ts'
+import { Link } from 'react-router'
+import { getJson } from '../../lib/api-client.ts'
 
 type ServerState = 'checking' | 'online' | 'offline'
 
 /**
- * Pantalla de inicio de la etapa E0: confirma que frontend y API funcionan juntos.
- * Las pantallas de invitado y anfitrión llegan en E1 y E2.
+ * Pantalla de inicio: explica cómo entrar (con el QR) y lleva al panel del anfitrión.
+ * La pantalla del invitado llega en E2.
  */
-export function App() {
+export function HomePage() {
   const [server, setServer] = useState<ServerState>('checking')
 
   useEffect(() => {
@@ -36,6 +37,9 @@ export function App() {
           </span>
         )}
       </p>
+      <Link className="text-arena underline" to="/anfitrion">
+        Soy el anfitrión
+      </Link>
     </main>
   )
 }

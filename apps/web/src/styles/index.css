@@ -43,3 +43,21 @@
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* Imprimir solo la tarjeta del QR fijo (D-21). */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    height: fit-content;
+    width: fit-content;
+  }
+}

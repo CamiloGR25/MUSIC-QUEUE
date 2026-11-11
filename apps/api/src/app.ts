@@ -1,13 +1,47 @@
+import fastifyCookie from '@fastify/cookie'
 import fastifyHelmet from '@fastify/helmet'
+import fastifyRateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { AppConfig } from './config/env.ts'
+import { registerOriginCheck } from './lib/csrf.ts'
 import { notFoundBody, registerErrorHandling } from './lib/errors.ts'
+import { hostAuthRoutes } from './modules/host-auth/routes.ts'
+import { HostTokenStore } from './modules/host-auth/token-store.ts'
+import { fixedQrRoutes } from './modules/fixed-qr/routes.ts'
+import { guestRoutes } from './modules/guests/routes.ts'
+import { hostRoutes } from './modules/host/routes.ts'
+import { KeepAwake } from './modules/keep-awake/keep-awake.ts'
+import { MemoryStore, type SessionStore } from './modules/sessions/store.ts'
+import { HttpSpotifyAccounts, type SpotifyAccounts } from './providers/spotify/accounts.ts'
+import { HttpSpotifyCatalog, type SpotifyCatalog } from './providers/spotify/catalog.ts'
 import { healthRoutes } from './routes/health.ts'
 
 type BuildOptions = {
   /** false en pruebas para no ensuciar la salida. */
   logger?: boolean
+  /** Dependencias externas reemplazables en pruebas. */
+  accounts?: SpotifyAccounts
+  catalog?: SpotifyCatalog
+  now?: () => number
+  /** Consulta a la URL pública que hace KeepAwake (R-AWAKE-01). */
+  ping?: () => Promise<void>
+}
+
+export type AppServices = {
+  tokens: HostTokenStore
+  sessions: SessionStore
+  keepAwake: KeepAwake
+}
+
+/** Barrido de sesiones vencidas (docs/DISENO.md §2.3). */
+const SWEEP_INTERVAL_MS = 10 * 60 * 1000
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** Estado en memoria del servidor (D-18); las pruebas lo inspeccionan. */
+    services: AppServices
+  }
 }
 
 /**
@@ -17,7 +51,7 @@ type BuildOptions = {
  */
 export async function buildApp(
   config: AppConfig,
-  { logger = true }: BuildOptions = {},
+  { logger = true, accounts, catalog, now = Date.now, ping }: BuildOptions = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger && {
@@ -27,6 +61,20 @@ export async function buildApp(
     trustProxy: config.env === 'production',
   })
 
+  const spotifyAccounts = accounts ?? new HttpSpotifyAccounts(config.spotify)
+  const spotifyCatalog = catalog ?? new HttpSpotifyCatalog(config.spotify)
+  const services: AppServices = {
+    tokens: new HostTokenStore(spotifyAccounts, now),
+    sessions: new MemoryStore(now, config.sessionTtlHours),
+    keepAwake: new KeepAwake({
+      ...config.keepAwake,
+      timeZone: config.timezone,
+      now,
+      ping: ping ?? (() => pingHealth(config.publicBaseUrl)),
+      onError: (error) => app.log.warn({ err: error }, 'KeepAwake no pudo consultar /api/health'),
+    }),
+  }
+
   await app.register(fastifyHelmet, {
     contentSecurityPolicy: {
       directives: {
@@ -35,10 +83,42 @@ export async function buildApp(
       },
     },
   })
+  await app.register(fastifyCookie, { secret: config.cookieSecret })
+  await app.register(fastifyRateLimit, { global: false })
 
+  app.decorate('services', services)
   registerErrorHandling(app)
+  registerOriginCheck(app, config.allowedOrigins)
+  app.decorateRequest('hostAuth', null)
 
+  const deps = { config, accounts: spotifyAccounts, tokens: services.tokens, now }
   await app.register(healthRoutes, { prefix: '/api' })
+  await app.register((scope) => hostAuthRoutes(scope, deps), { prefix: '/api' })
+  await app.register(
+    (scope) =>
+      hostRoutes(scope, { ...deps, sessions: services.sessions, keepAwake: services.keepAwake }),
+    { prefix: '/api' },
+  )
+  await app.register(
+    (scope) => guestRoutes(scope, { config, sessions: services.sessions, catalog: spotifyCatalog }),
+    {
+      prefix: '/api',
+    },
+  )
+
+  await app.register((scope) => fixedQrRoutes(scope, { config, sessions: services.sessions }), {
+    prefix: '/api',
+  })
+
+  const sweeper = setInterval(() => {
+    const removed = services.sessions.sweep()
+    if (removed > 0) app.log.info({ removed }, 'Sesiones vencidas borradas')
+  }, SWEEP_INTERVAL_MS)
+  sweeper.unref()
+  app.addHook('onClose', async () => {
+    clearInterval(sweeper)
+    services.keepAwake.stop()
+  })
 
   if (config.webDistDir) {
     await app.register(fastifyStatic, { root: config.webDistDir, wildcard: false })
@@ -54,4 +134,11 @@ export async function buildApp(
   })
 
   return app
+}
+
+async function pingHealth(publicBaseUrl: string): Promise<void> {
+  const response = await fetch(`${publicBaseUrl}/api/health`, {
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error(`/api/health respondió ${response.status}`)
 }

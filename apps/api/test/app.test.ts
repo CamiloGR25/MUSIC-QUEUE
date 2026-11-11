@@ -7,7 +7,7 @@ import { testApp } from './helpers.ts'
 
 describe('GET /api/health', () => {
   it('responde ok con el tiempo encendido', async () => {
-    const app = await testApp()
+    const { app } = await testApp()
     const res = await app.inject({ method: 'GET', url: '/api/health' })
     expect(res.statusCode).toBe(200)
     expect(healthResponseSchema.parse(res.json()).ok).toBe(true)
@@ -15,7 +15,7 @@ describe('GET /api/health', () => {
   })
 
   it('envía cabeceras de seguridad con las portadas de Spotify permitidas', async () => {
-    const app = await testApp()
+    const { app } = await testApp()
     const res = await app.inject({ method: 'GET', url: '/api/health' })
     expect(res.headers['content-security-policy']).toContain('https://i.scdn.co')
     expect(res.headers['x-content-type-options']).toBe('nosniff')
@@ -25,10 +25,24 @@ describe('GET /api/health', () => {
 
 describe('rutas inexistentes', () => {
   it('una ruta de la API que no existe responde 404 con el formato de error', async () => {
-    const app = await testApp()
+    const { app } = await testApp()
     const res = await app.inject({ method: 'GET', url: '/api/no-existe' })
     expect(res.statusCode).toBe(404)
     expect(apiErrorSchema.parse(res.json()).error.code).toBe('NOT_FOUND')
+    await app.close()
+  })
+})
+
+describe('protección CSRF', () => {
+  it('rechaza una mutación sin Origin del mismo dominio', async () => {
+    const { app } = await testApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/logout',
+      headers: { origin: 'https://otro-sitio.example' },
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().error.code).toBe('FORBIDDEN_ORIGIN')
     await app.close()
   })
 })
@@ -39,7 +53,7 @@ describe('frontend compilado', () => {
   afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
   it('las rutas del frontend devuelven index.html (las resuelve React Router)', async () => {
-    const app = await testApp(dir)
+    const { app } = await testApp({ webDistDir: dir })
     const res = await app.inject({ method: 'GET', url: '/s/K7M2P9QX4D' })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('text/html')
@@ -48,7 +62,7 @@ describe('frontend compilado', () => {
   })
 
   it('una ruta de la API inexistente sigue respondiendo JSON aunque haya frontend', async () => {
-    const app = await testApp(dir)
+    const { app } = await testApp({ webDistDir: dir })
     const res = await app.inject({ method: 'GET', url: '/api/nada' })
     expect(res.statusCode).toBe(404)
     expect(res.json().error.code).toBe('NOT_FOUND')
