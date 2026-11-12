@@ -1,12 +1,28 @@
 import { createBrowserRouter } from 'react-router'
-import { FixedEntryPage } from '../features/guest/fixed-entry-page.tsx'
-import { GuestPage } from '../features/guest/guest-page.tsx'
-import { HomePage } from '../features/home/home-page.tsx'
-import { HostPage } from '../features/host/host-page.tsx'
 
+/**
+ * Cada pantalla se descarga solo cuando se abre: el celular del invitado no baja el código del
+ * panel del anfitrión (QR, impresión, controles) ni al revés.
+ */
 export const router = createBrowserRouter([
-  { path: '/', element: <HomePage /> },
-  { path: '/anfitrion', element: <HostPage /> },
-  { path: '/s/:code', element: <GuestPage /> },
-  { path: '/e/:code', element: <FixedEntryPage /> },
+  {
+    path: '/',
+    lazy: async () => ({ Component: (await import('../features/home/home-page.tsx')).HomePage }),
+  },
+  {
+    path: '/anfitrion',
+    lazy: async () => ({ Component: (await import('../features/host/host-page.tsx')).HostPage }),
+  },
+  {
+    path: '/s/:code',
+    lazy: async () => ({
+      Component: (await import('../features/guest/guest-page.tsx')).GuestPage,
+    }),
+  },
+  {
+    path: '/e/:code',
+    lazy: async () => ({
+      Component: (await import('../features/guest/fixed-entry-page.tsx')).FixedEntryPage,
+    }),
+  },
 ])

@@ -16,6 +16,13 @@ export const hostApi = {
   removeTrack: (sessionId: string, trackId: string) =>
     sendJson('DELETE', `/host/sessions/${sessionId}/tracks/${trackId}`, {}, nothing),
   eventsUrl: (sessionId: string) => `/api/host/sessions/${sessionId}/events`,
+  /** R-PAR-03: bloquear (true) o desbloquear (false) a un invitado. */
+  setBlocked: (sessionId: string, participantId: string, blocked: boolean) =>
+    postJson(
+      `/host/sessions/${sessionId}/participants/${participantId}/${blocked ? 'block' : 'unblock'}`,
+      {},
+      nothing,
+    ),
   play: (sessionId: string) => postJson(`/host/sessions/${sessionId}/playback/play`, {}, nothing),
   pause: (sessionId: string) => postJson(`/host/sessions/${sessionId}/playback/pause`, {}, nothing),
   next: (sessionId: string) => postJson(`/host/sessions/${sessionId}/playback/next`, {}, nothing),

@@ -9,7 +9,7 @@ export function TextField({
     <label className="flex flex-col gap-2">
       <span className="text-titulo font-bold">{label}</span>
       <input
-        className="min-h-12 rounded-xl border border-arena/40 bg-mesa px-4 text-crema placeholder:text-arena/70"
+        className="min-h-12 rounded-xl border border-arena/40 bg-mesa px-4 text-crema placeholder:text-arena/85"
         {...props}
       />
     </label>

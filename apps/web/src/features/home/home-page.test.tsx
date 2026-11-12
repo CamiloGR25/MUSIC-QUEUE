@@ -19,7 +19,7 @@ describe('HomePage', () => {
         <HomePage />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('heading', { name: 'Cola musical' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'El Imperio Bar' })).toBeInTheDocument()
     expect(await screen.findByText('Servidor listo.')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/health', expect.anything())
   })

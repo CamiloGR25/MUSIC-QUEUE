@@ -14,6 +14,8 @@ export type Participant = {
   /** Orden de llegada: "Invitado N" cuando no hay apodo. */
   guestNumber: number
   joinedAt: number
+  /** R-PAR-03: un invitado bloqueado no puede agregar ni votar. */
+  status: 'active' | 'blocked'
 }
 
 /**
@@ -136,6 +138,8 @@ export interface SessionStore {
   votedTrackIds(sessionId: string, participantId: string): string[]
   /** R-CAN-06: el anfitrión quita una canción pendiente. */
   removeTrack(sessionId: string, trackId: string): Track
+  /** R-PAR-03: el anfitrión bloquea o desbloquea a un invitado. */
+  setBlocked(sessionId: string, participantId: string, blocked: boolean): Participant
   /** R-SYNC-01/02: la primera de la cola pasa a "Sigue" (ya no se vota). null si no hay. */
   takeNext(sessionId: string): Track | null
   /** Si Spotify no la aceptó, vuelve a la cola con sus votos y su antigüedad. */
@@ -259,6 +263,7 @@ export class MemoryStore implements SessionStore {
       displayName,
       guestNumber: session.guestCounter,
       joinedAt: this.now(),
+      status: 'active',
     }
     session.participants.set(participant.id, participant)
     session.participantByTokenHash.set(tokenHash, participant.id)
@@ -283,9 +288,7 @@ export class MemoryStore implements SessionStore {
 
   addTrack(sessionId: string, participantId: string, catalog: CatalogTrack): Track {
     const session = this.activeSession(sessionId)
-    if (!session.participants.has(participantId)) {
-      throw new AppError(401, 'NOT_PARTICIPANT', 'Entra a la sesión para pedir canciones.')
-    }
+    this.activeParticipant(session, participantId)
     const existing = session.activeBySpotifyId.get(catalog.spotifyTrackId)
     if (existing) {
       throw new AppError(409, 'DUPLICATE_TRACK', 'Ya está en la cola. Puedes votarla.', {
@@ -330,9 +333,7 @@ export class MemoryStore implements SessionStore {
 
   setVote(sessionId: string, trackId: string, participantId: string, voted: boolean) {
     const session = this.activeSession(sessionId)
-    if (!session.participants.has(participantId)) {
-      throw new AppError(401, 'NOT_PARTICIPANT', 'Entra a la sesión para pedir canciones.')
-    }
+    this.activeParticipant(session, participantId)
     const track = this.pendingTrack(session, trackId)
     const voters = session.votes.get(track.id)!
     const before = voters.size
@@ -362,6 +363,14 @@ export class MemoryStore implements SessionStore {
     session.votes.delete(track.id)
     session.queueVersion += 1
     return track
+  }
+
+  setBlocked(sessionId: string, participantId: string, blocked: boolean): Participant {
+    const session = this.activeSession(sessionId)
+    const participant = session.participants.get(participantId)
+    if (!participant) throw new AppError(404, 'NOT_FOUND', 'Ese invitado no está en la sesión.')
+    participant.status = blocked ? 'blocked' : 'active'
+    return participant
   }
 
   takeNext(sessionId: string): Track | null {
@@ -453,6 +462,22 @@ export class MemoryStore implements SessionStore {
       throw new AppError(409, 'SESSION_ENDED', 'La sesión terminó.')
     }
     return session
+  }
+
+  /** R-PAR-03: solo un invitado de la sesión y no bloqueado puede agregar o votar. */
+  private activeParticipant(session: SessionState, participantId: string): Participant {
+    const participant = session.participants.get(participantId)
+    if (!participant) {
+      throw new AppError(401, 'NOT_PARTICIPANT', 'Entra a la sesión para pedir canciones.')
+    }
+    if (participant.status === 'blocked') {
+      throw new AppError(
+        403,
+        'PARTICIPANT_BLOCKED',
+        'El anfitrión desactivó tus pedidos y votos en esta sesión.',
+      )
+    }
+    return participant
   }
 
   /** D-6: una canción que ya sonó (o se saltó) se puede volver a pedir. */

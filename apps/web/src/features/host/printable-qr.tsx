@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { APP_NAME } from '../../components/brand.tsx'
 import { Button } from '../../components/button.tsx'
 import { QrCode } from '../../components/qr-code.tsx'
 
@@ -35,6 +36,7 @@ export function PrintableQr({ url }: { url: string }) {
           aria-label="QR para imprimir"
         >
           <div className="print-area flex flex-col items-center gap-4 rounded-3xl bg-crema p-8 text-center text-noche">
+            <p className="text-grande leading-none font-bold">{APP_NAME}</p>
             <p className="text-seccion font-bold">Pide tu canción</p>
             <QrCode value={url} label="QR fijo para entrar a la fiesta" className="w-72" />
             <p>Escanea con la cámara del celular para pedir canciones y votar.</p>

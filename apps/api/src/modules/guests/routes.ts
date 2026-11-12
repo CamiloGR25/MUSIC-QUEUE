@@ -110,6 +110,7 @@ export async function guestRoutes(app: FastifyInstance, deps: GuestDeps) {
             participantId: participant.id,
             name: participantName(participant),
             votedTrackIds: sessions.votedTrackIds(session.id, participant.id),
+            blocked: participant.status === 'blocked',
           }
         : null,
       ...queue,
@@ -155,8 +156,9 @@ export async function guestRoutes(app: FastifyInstance, deps: GuestDeps) {
     }
     const { displayName } = parseWith(renameBodySchema, request.body)
     const renamed = sessions.rename(session.id, participant.id, displayName)
-    // "La pidió …" cambia en la cola si esta persona agregó canciones.
+    // "La pidió …" cambia en la cola si esta persona agregó canciones, y en el panel.
     notify.queue(session.id)
+    notify.participants(session.id)
     return { name: participantName(renamed) }
   })
 
@@ -195,6 +197,7 @@ export async function guestRoutes(app: FastifyInstance, deps: GuestDeps) {
     const track = sessions.addTrack(session.id, participant.id, catalogTrack)
     const ranked = sessions.queue(session.id).find((item) => item.id === track.id)!
     notify.queue(session.id)
+    notify.participants(session.id)
     request.log.info({ sessionId: session.id, trackId: track.id }, 'Canción agregada')
     return reply.status(201).send({ track: toTrackView(ranked, session) })
   })

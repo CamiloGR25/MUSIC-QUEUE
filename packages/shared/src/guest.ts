@@ -31,6 +31,8 @@ export const sessionSnapshotSchema = z.object({
       name: z.string(),
       /** Canciones pendientes que este invitado votó (su botón aparece marcado). */
       votedTrackIds: z.array(z.string()),
+      /** R-PAR-03: el anfitrión desactivó sus pedidos y votos. */
+      blocked: z.boolean(),
     })
     .nullable(),
   /** R-COLA-03: versión de la cola. */

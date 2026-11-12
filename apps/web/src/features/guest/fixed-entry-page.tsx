@@ -1,6 +1,7 @@
 import { fixedEntrySchema } from '@musica/shared'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
+import { Brand } from '../../components/brand.tsx'
 import { Button } from '../../components/button.tsx'
 import { ApiRequestError, errorMessage, getJson } from '../../lib/api-client.ts'
 
@@ -52,6 +53,7 @@ export function FixedEntryPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 px-4 py-10">
+      <Brand as="p" />
       {state.kind === 'loading' && <p className="text-arena">Buscando la fiesta…</p>}
       {state.kind === 'no-party' && (
         <>

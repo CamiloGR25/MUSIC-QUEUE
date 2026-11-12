@@ -109,7 +109,7 @@ export function SearchSheet({
             <div className="flex items-center gap-2 p-4">
               <input
                 type="search"
-                className="min-h-12 flex-1 rounded-xl border border-arena/40 bg-noche px-4 text-crema placeholder:text-arena/70"
+                className="min-h-12 flex-1 rounded-xl border border-arena/40 bg-noche px-4 text-crema placeholder:text-arena/85"
                 placeholder="Canción, artista o álbum"
                 aria-label="Buscar canción, artista o álbum"
                 value={query}

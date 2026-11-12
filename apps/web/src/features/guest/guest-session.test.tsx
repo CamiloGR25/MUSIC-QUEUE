@@ -25,7 +25,7 @@ const track = (n: number, votes = 1, position = n): TrackView => ({
 
 const snapshot = (overrides: Partial<SessionSnapshot> = {}): SessionSnapshot => ({
   session: { code: CODE, name: 'Fiesta', status: 'active' },
-  me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [] },
+  me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [], blocked: false },
   version: 2,
   queue: [track(1), track(2)],
   nowPlaying: null,
@@ -92,7 +92,9 @@ describe('votar (R-VOT)', () => {
   it('las canciones que ya votó aparecen marcadas', async () => {
     stubApi(() =>
       Response.json(
-        snapshot({ me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [track(2).id] } }),
+        snapshot({
+          me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [track(2).id], blocked: false },
+        }),
       ),
     )
     await renderPage()
@@ -157,7 +159,9 @@ describe('doble toque = like', () => {
   it('si ya la votó, el doble toque no le quita el voto', async () => {
     const fetchMock = stubApi(() =>
       Response.json(
-        snapshot({ me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [track(1).id] } }),
+        snapshot({
+          me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [track(1).id], blocked: false },
+        }),
       ),
     )
     await renderPage()
@@ -177,6 +181,40 @@ describe('doble toque = like', () => {
     await renderPage()
     tapsAt([row('Canción 1'), row('Canción 2')], 1000, 1100)
     expect(voteCalls(fetchMock)).toEqual([])
+  })
+})
+
+describe('invitado bloqueado (R-PAR-03)', () => {
+  it('lo ve en pantalla, sin botón de añadir y sin poder votar', async () => {
+    stubApi(() =>
+      Response.json(
+        snapshot({ me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [], blocked: true } }),
+      ),
+    )
+    await renderPage()
+    expect(screen.getByRole('alert')).toHaveTextContent('El anfitrión desactivó tus pedidos')
+    expect(screen.queryByRole('button', { name: '+ Añadir canción' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Votar por Canción 1, 1 voto' })).toBeDisabled()
+  })
+
+  it('si lo bloquean mientras está dentro, se entera al intentar votar', async () => {
+    stubApi((url) =>
+      url.endsWith('/vote')
+        ? Response.json(
+            {
+              error: {
+                code: 'PARTICIPANT_BLOCKED',
+                message: 'El anfitrión desactivó tus pedidos y votos en esta sesión.',
+              },
+            },
+            { status: 403 },
+          )
+        : undefined,
+    )
+    await renderPage()
+    await userEvent.click(screen.getByRole('button', { name: 'Votar por Canción 1, 1 voto' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('El anfitrión desactivó')
+    expect(screen.queryByRole('button', { name: '+ Añadir canción' })).not.toBeInTheDocument()
   })
 })
 

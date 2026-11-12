@@ -48,7 +48,9 @@ describe('GuestPage', () => {
       if (url === `/api/sessions/${CODE}`) return Response.json(snapshot())
       if (init?.method === 'POST') {
         return Response.json(
-          snapshot({ me: { participantId: 'p1', name: 'Tía Marta', votedTrackIds: [] } }),
+          snapshot({
+            me: { participantId: 'p1', name: 'Tía Marta', votedTrackIds: [], blocked: false },
+          }),
           {
             status: 201,
           },
@@ -60,6 +62,8 @@ describe('GuestPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Cumpleaños de la abuela' }),
     ).toBeInTheDocument()
+    // "El Imperio Bar" es el título de la app en todo el recorrido del invitado.
+    expect(screen.getByRole('heading', { name: 'El Imperio Bar', level: 1 })).toBeInTheDocument()
     await userEvent.type(screen.getByLabelText('¿Cómo te llamamos?'), 'Tía Marta')
     await userEvent.click(screen.getByRole('button', { name: 'Entrar' }))
 
@@ -72,7 +76,9 @@ describe('GuestPage', () => {
   it('quien ya entró ve la sesión sin volver a entrar', async () => {
     stubApi(() =>
       Response.json(
-        snapshot({ me: { participantId: 'p1', name: 'Invitado 4', votedTrackIds: [] } }),
+        snapshot({
+          me: { participantId: 'p1', name: 'Invitado 4', votedTrackIds: [], blocked: false },
+        }),
       ),
     )
     renderAt()
@@ -84,7 +90,9 @@ describe('GuestPage', () => {
     stubApi((_url, init) => {
       if (init?.method === 'PATCH') return Response.json({ name: 'Abuela' })
       return Response.json(
-        snapshot({ me: { participantId: 'p1', name: 'Invitado 1', votedTrackIds: [] } }),
+        snapshot({
+          me: { participantId: 'p1', name: 'Invitado 1', votedTrackIds: [], blocked: false },
+        }),
       )
     })
     renderAt()
@@ -120,7 +128,7 @@ describe('GuestPage', () => {
       Response.json(
         snapshot({
           session: { code: 'ABCDEFGH12', name: 'Fiesta', status: 'active' },
-          me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [] },
+          me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [], blocked: false },
         }),
       ),
     )
@@ -146,7 +154,7 @@ const track = (n: number, votes = 1) => ({
 })
 
 describe('cola y buscador en la pantalla del invitado', () => {
-  const inside = { participantId: 'p1', name: 'Pipe', votedTrackIds: [] }
+  const inside = { participantId: 'p1', name: 'Pipe', votedTrackIds: [], blocked: false }
 
   it('muestra la cola en orden con posición, quién la pidió, duración y votos', async () => {
     stubApi(() => Response.json(snapshot({ me: inside, queue: [track(1, 3), track(2, 1)] })))

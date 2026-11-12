@@ -100,6 +100,7 @@ export function GuestSession({
   }, [highlightId])
 
   const voted = new Set(snapshot.me?.votedTrackIds)
+  const blocked = snapshot.me?.blocked ?? false
 
   const toggleVote = async (track: TrackView) => {
     const next = !voted.has(track.id)
@@ -111,6 +112,10 @@ export function GuestSession({
     } catch (error) {
       update((current) => withVote(current, track.id, !next))
       setNotice({ text: errorMessage(error), error: true })
+      // R-PAR-03: si el anfitrión lo bloqueó, la pantalla lo refleja de inmediato.
+      if (error instanceof ApiRequestError && error.code === 'PARTICIPANT_BLOCKED') {
+        update((current) => ({ ...current, me: current.me && { ...current.me, blocked: true } }))
+      }
     } finally {
       setBusy((ids) => {
         const rest = new Set(ids)
@@ -142,9 +147,11 @@ export function GuestSession({
 
       {header}
 
-      <p role="status" className={`min-h-6 ${notice?.error ? 'text-alerta' : 'text-hoja'}`}>
-        {notice?.text}
-      </p>
+      {blocked && (
+        <p role="alert" className="rounded-2xl border border-bombillo/50 p-4 text-bombillo">
+          El anfitrión desactivó tus pedidos y votos en esta sesión. Puedes seguir viendo la música.
+        </p>
+      )}
 
       <NowPlaying nowPlaying={snapshot.nowPlaying} next={snapshot.next} />
 
@@ -164,13 +171,13 @@ export function GuestSession({
           highlightId={highlightId}
           // Doble toque = like (como en redes sociales). Si ya la votó, no quita el voto.
           onDoubleTap={(track) => {
-            if (!voted.has(track.id) && !busy.has(track.id)) void toggleVote(track)
+            if (!blocked && !voted.has(track.id) && !busy.has(track.id)) void toggleVote(track)
           }}
           action={(track) => (
             <VoteButton
               track={track}
               voted={voted.has(track.id)}
-              busy={busy.has(track.id)}
+              busy={blocked || busy.has(track.id)}
               onToggle={() => void toggleVote(track)}
             />
           )}
@@ -180,10 +187,22 @@ export function GuestSession({
       <p className="pb-24 text-meta text-arena">Canciones y portadas de Spotify.</p>
 
       <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-noche via-noche/95 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="mx-auto w-full max-w-md">
-          <Button className="w-full" onClick={() => setSearching(true)}>
-            + Añadir canción
-          </Button>
+        <div className="mx-auto flex w-full max-w-md flex-col gap-3">
+          {/* Avisos flotantes sobre el botón: no dejan un hueco en la página cuando no hay. */}
+          <div role="status" aria-live="polite">
+            {notice && (
+              <p
+                className={`rounded-2xl bg-mesa-alta px-4 py-3 shadow-lg ${notice.error ? 'text-alerta' : 'text-hoja'}`}
+              >
+                {notice.text}
+              </p>
+            )}
+          </div>
+          {!blocked && (
+            <Button className="w-full" onClick={() => setSearching(true)}>
+              + Añadir canción
+            </Button>
+          )}
         </div>
       </div>
 

@@ -165,11 +165,12 @@ describe('sesión activa en el panel', () => {
     expect(await screen.findByText('http://127.0.0.1:5180/s/ABCDEFGH12')).toBeInTheDocument()
   })
 
-  it('muestra cuántos invitados hay y el QR en pantalla completa', async () => {
-    stubApi(() => Response.json(me({ activeSession: { ...session, participantsCount: 3 } })))
+  it('muestra el QR en pantalla completa', async () => {
+    stubApi(() => Response.json(me({ activeSession: session })))
     renderAt()
-    expect(await screen.findByText('3 invitados')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Mostrar QR en pantalla completa' }))
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Mostrar QR en pantalla completa' }),
+    )
     const dialog = screen.getByRole('dialog', { name: 'Código QR en pantalla completa' })
     expect(dialog).toHaveTextContent('Escanea para pedir canciones y votar')
     await userEvent.keyboard('{Escape}')
@@ -185,11 +186,20 @@ describe('QR para imprimir (D-21)', () => {
     renderAt()
     await userEvent.click(await screen.findByRole('button', { name: 'Ver e imprimir el QR' }))
     const dialog = screen.getByRole('dialog', { name: 'QR para imprimir' })
+    expect(dialog).toHaveTextContent('El Imperio Bar')
     expect(dialog).toHaveTextContent('Pide tu canción')
     expect(await screen.findByAltText('QR fijo para entrar a la fiesta')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Imprimir' }))
     expect(print).toHaveBeenCalled()
   })
+})
+
+const guest = (name: string, status: 'active' | 'blocked' = 'active') => ({
+  id: `6f1b0f1e-0000-4000-8000-0000000000${name.length}${name.charCodeAt(0) % 10}`,
+  name,
+  status,
+  joinedAt: '2026-11-12T20:00:00.000Z',
+  tracksAdded: 0,
 })
 
 describe('panel en vivo (SSE)', () => {
@@ -225,6 +235,7 @@ describe('panel en vivo (SSE)', () => {
         nowPlaying: null,
         next: null,
         sync: { status: 'ok', deviceName: 'Sala TV', lastError: null },
+        participants: [guest('Ana'), guest('Beto', 'blocked')],
       })
     })
     return { source, fetchMock }
@@ -234,9 +245,15 @@ describe('panel en vivo (SSE)', () => {
     const { source } = await renderLive()
     expect(source.url).toBe(`/api/host/sessions/${session.id}/events`)
     expect(screen.getByText('2 invitados')).toBeInTheDocument()
+    expect(screen.getByText('Bloqueado: no puede pedir ni votar')).toBeInTheDocument()
     expect(screen.getByText('La gota fría')).toBeInTheDocument()
-    act(() => source.emit('participants.updated', { count: 5 }))
-    expect(screen.getByText('5 invitados')).toBeInTheDocument()
+    act(() =>
+      source.emit('participants.updated', {
+        count: 3,
+        items: [guest('Ana'), guest('Beto', 'blocked'), guest('Carla')],
+      }),
+    )
+    expect(screen.getByText('3 invitados')).toBeInTheDocument()
   })
 
   it('quita una canción después de confirmar', async () => {
@@ -276,6 +293,7 @@ describe('música en el panel (E5)', () => {
         nowPlaying,
         next: null,
         sync,
+        participants: [],
       })
     })
     return { source, fetchMock }
@@ -371,5 +389,46 @@ describe('música en el panel (E5)', () => {
     const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({ deviceId: 'd1' })
     expect(screen.queryByRole('group', { name: 'Dispositivos de Spotify' })).not.toBeInTheDocument()
+  })
+})
+
+describe('invitados en el panel (R-PAR-03)', () => {
+  it('bloquea con confirmación y desbloquea sin ella', async () => {
+    const ana = guest('Ana')
+    const fetchMock = stubApi((url) =>
+      url.includes('/participants/')
+        ? new Response(null, { status: 204 })
+        : Response.json(me({ activeSession: session })),
+    )
+    renderAt()
+    await screen.findByText('Sesión activa')
+    await waitFor(() => expect(FakeEventSource.instances).not.toHaveLength(0))
+    const source = FakeEventSource.latest()
+    act(() => {
+      source.open()
+      source.emit('snapshot', {
+        session,
+        version: 1,
+        queue: [],
+        nowPlaying: null,
+        next: null,
+        sync: { status: 'ok', deviceName: 'Sala', lastError: null },
+        participants: [ana],
+      })
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Bloquear a Ana' }))
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('/block'))).toBe(false)
+    await userEvent.click(screen.getByRole('button', { name: 'Sí, bloquear' }))
+    expect(
+      fetchMock.mock.calls.some(([url]) => url.endsWith(`/participants/${ana.id}/block`)),
+    ).toBe(true)
+
+    act(() =>
+      source.emit('participants.updated', { count: 1, items: [{ ...ana, status: 'blocked' }] }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Desbloquear a Ana' }))
+    expect(
+      fetchMock.mock.calls.some(([url]) => url.endsWith(`/participants/${ana.id}/unblock`)),
+    ).toBe(true)
   })
 })

@@ -145,7 +145,6 @@ function CreateSession({ disabled, onCreated }: { disabled: boolean; onCreated: 
         label="Nombre del evento"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Cumpleaños de la abuela"
         maxLength={60}
         required
       />

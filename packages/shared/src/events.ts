@@ -22,8 +22,22 @@ export const sessionUpdatedSchema = z.object({
 })
 export type SessionUpdated = z.infer<typeof sessionUpdatedSchema>
 
+/** Invitado tal como lo ve el anfitrión (R-PAR-03). */
+export const hostParticipantSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.enum(['active', 'blocked']),
+  joinedAt: z.string(),
+  /** Canciones que pidió en la sesión. */
+  tracksAdded: z.number().int().nonnegative(),
+})
+export type HostParticipant = z.infer<typeof hostParticipantSchema>
+
 /** Solo para el panel del anfitrión. */
-export const participantsUpdatedSchema = z.object({ count: z.number().int().nonnegative() })
+export const participantsUpdatedSchema = z.object({
+  count: z.number().int().nonnegative(),
+  items: z.array(hostParticipantSchema),
+})
 
 /** Estado inicial del panel al conectarse (y al reconectarse). */
 export const hostSnapshotSchema = z.object({
@@ -33,6 +47,7 @@ export const hostSnapshotSchema = z.object({
   nowPlaying: nowPlayingSchema,
   next: upcomingTrackSchema.nullable(),
   sync: syncStatusSchema,
+  participants: z.array(hostParticipantSchema),
 })
 export type HostSnapshot = z.infer<typeof hostSnapshotSchema>
 

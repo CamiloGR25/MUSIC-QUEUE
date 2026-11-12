@@ -1,6 +1,12 @@
-import type { Playback, QueueUpdated, SessionUpdated, SyncStatusView } from '@musica/shared'
+import type {
+  HostParticipant,
+  Playback,
+  QueueUpdated,
+  SessionUpdated,
+  SyncStatusView,
+} from '@musica/shared'
 import { toPlayback, toSyncStatus, toTrackView } from '../queue/views.ts'
-import type { SessionStore } from '../sessions/store.ts'
+import { participantName, type SessionStore } from '../sessions/store.ts'
 import type { EventBus } from './event-bus.ts'
 
 /**
@@ -64,13 +70,30 @@ export class Notifier {
     if (data) this.bus.publish(sessionId, { name: 'sync.status', data })
   }
 
-  participants(sessionId: string): void {
+  /** Invitados en orden de llegada, con cuántas canciones pidió cada uno (panel). */
+  participantsPayload(sessionId: string): HostParticipant[] {
     const session = this.sessions.findById(sessionId)
-    if (session) {
-      this.bus.publish(sessionId, {
-        name: 'participants.updated',
-        data: { count: session.participants.size },
-      })
+    if (!session) return []
+    const added = new Map<string, number>()
+    for (const track of session.tracks.values()) {
+      added.set(track.addedBy, (added.get(track.addedBy) ?? 0) + 1)
     }
+    return [...session.participants.values()]
+      .sort((a, b) => a.guestNumber - b.guestNumber)
+      .map((participant) => ({
+        id: participant.id,
+        name: participantName(participant),
+        status: participant.status,
+        joinedAt: new Date(participant.joinedAt).toISOString(),
+        tracksAdded: added.get(participant.id) ?? 0,
+      }))
+  }
+
+  participants(sessionId: string): void {
+    const items = this.participantsPayload(sessionId)
+    this.bus.publish(sessionId, {
+      name: 'participants.updated',
+      data: { count: items.length, items },
+    })
   }
 }

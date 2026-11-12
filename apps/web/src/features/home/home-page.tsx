@@ -1,6 +1,7 @@
 import { healthResponseSchema } from '@musica/shared'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { Brand } from '../../components/brand.tsx'
 import { getJson } from '../../lib/api-client.ts'
 
 type ServerState = 'checking' | 'online' | 'offline'
@@ -24,7 +25,7 @@ export function HomePage() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-6 px-4 py-10">
-      <h1 className="text-sesion leading-tight font-bold">Cola musical</h1>
+      <Brand />
       <p className="text-titulo text-arena">
         Escanea el código QR del anfitrión para pedir canciones y votar las que quieres oír.
       </p>

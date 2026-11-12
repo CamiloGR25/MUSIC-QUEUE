@@ -33,6 +33,7 @@ type HostDeps = HostAuthDeps & {
 
 const sessionParamsSchema = z.object({ id: z.uuid() })
 const trackParamsSchema = z.object({ id: z.uuid(), trackId: z.uuid() })
+const participantParamsSchema = z.object({ id: z.uuid(), participantId: z.uuid() })
 
 export function toHostSession(session: SessionState, guestBaseUrl: string): HostSession {
   return {
@@ -139,6 +140,7 @@ export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<
     ...notify.queuePayload(session.id)!,
     ...notify.playbackPayload(session.id)!,
     sync: notify.syncPayload(session.id)!,
+    participants: notify.participantsPayload(session.id),
   })
 
   /** Sesión activa del anfitrión para los controles; si terminó, 409. */
@@ -183,6 +185,21 @@ export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<
     await controls.selectDevice(session, deviceId)
     return reply.status(204).send()
   })
+
+  /** R-PAR-03: bloquear o desbloquear a un invitado (no puede agregar ni votar). */
+  for (const [action, blocked] of [
+    ['block', true],
+    ['unblock', false],
+  ] as const) {
+    app.post(`/host/sessions/:id/participants/:participantId/${action}`, async (request, reply) => {
+      const session = activeOwn(request)
+      const { participantId } = parseWith(participantParamsSchema, request.params)
+      sessions.setBlocked(session.id, participantId, blocked)
+      notify.participants(session.id)
+      request.log.info({ sessionId: session.id, participantId, blocked }, 'Invitado actualizado')
+      return reply.status(204).send()
+    })
+  }
 
   /** R-CAN-06: quitar una canción pendiente. */
   app.delete('/host/sessions/:id/tracks/:trackId', async (request, reply) => {

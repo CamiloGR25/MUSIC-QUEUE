@@ -153,7 +153,10 @@ describe('tiempo real (SSE, docs/DISENO.md §5)', () => {
     })
     await join()
     const count = await panel.waitFor((e) => e.event === 'participants.updated')
-    expect(count.data).toEqual({ count: 1 })
+    expect(count.data).toMatchObject({
+      count: 1,
+      items: [{ name: 'Invitado 1', status: 'active', tracksAdded: 0 }],
+    })
     panel.close()
     await app.close()
   })

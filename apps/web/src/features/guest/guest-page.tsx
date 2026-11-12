@@ -2,6 +2,7 @@ import type { SessionSnapshot } from '@musica/shared'
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Button } from '../../components/button.tsx'
+import { Brand } from '../../components/brand.tsx'
 import { TextField } from '../../components/text-field.tsx'
 import { ApiRequestError, errorMessage } from '../../lib/api-client.ts'
 import { guestApi } from './guest-api.ts'
@@ -98,7 +99,8 @@ function Ready({
       onLost={onLost}
       header={
         <header className="flex flex-col gap-3">
-          <h1 className="text-sesion leading-tight font-bold">{snapshot.session.name}</h1>
+          <Brand />
+          <h2 className="text-titulo font-bold text-bombillo">{snapshot.session.name}</h2>
           <MyName
             code={snapshot.session.code}
             name={me.name}
@@ -139,8 +141,9 @@ function Join({
 
   return (
     <form className="flex flex-1 flex-col justify-center gap-6" onSubmit={(e) => void submit(e)}>
-      <div className="flex flex-col gap-2">
-        <h1 className="text-sesion leading-tight font-bold">{snapshot.session.name}</h1>
+      <div className="flex flex-col gap-3">
+        <Brand />
+        <h2 className="text-titulo font-bold text-bombillo">{snapshot.session.name}</h2>
         <p className="text-titulo text-arena">Pide canciones y vota las que quieres oír.</p>
       </div>
       <TextField
@@ -224,7 +227,8 @@ function MyName({
 function Message({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-1 flex-col justify-center gap-3">
-      <h1 className="text-sesion leading-tight font-bold">{title}</h1>
+      <Brand as="p" />
+      <h1 className="mt-4 text-sesion leading-tight font-bold">{title}</h1>
       <p className="text-titulo text-arena">{children}</p>
     </section>
   )
