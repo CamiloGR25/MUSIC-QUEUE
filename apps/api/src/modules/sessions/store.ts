@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { randomCode } from '../../lib/crypto.ts'
 import { AppError } from '../../lib/errors.ts'
 import type { CatalogTrack } from '../../providers/spotify/catalog.ts'
+import type { PlayerItem } from '../../providers/spotify/player.ts'
 import { rankQueue } from '../queue/ranking.ts'
 
 /** Invitado anónimo (R-PAR-01, R-PAR-02). El token en claro solo vive en su cookie. */
@@ -15,7 +16,10 @@ export type Participant = {
   joinedAt: number
 }
 
-/** Estados de una canción (docs/DISENO.md §10). En E3 solo existe `pending`. */
+/**
+ * Estados de una canción (docs/DISENO.md §7): `pending` en la cola por votos; `queued` ya
+ * enviada a Spotify (fija, "Sigue"); `playing` sonando; `played`, `skipped` o `removed` al final.
+ */
 export type TrackStatus = 'pending' | 'queued' | 'playing' | 'played' | 'skipped' | 'removed'
 
 /** Canción de la sesión; los metadatos vienen siempre de Spotify (R-CAN-03). */
@@ -27,6 +31,32 @@ export type Track = CatalogTrack & {
   createdAt: number
   /** Orden de llegada dentro de la sesión, para desempatar en el mismo milisegundo. */
   seq: number
+  queuedAt: number | null
+  startedAt: number | null
+  finishedAt: number | null
+}
+
+/** Estado de la conexión con Spotify que ve el anfitrión (docs/DISENO.md §7). */
+export type SyncStatus =
+  | 'idle'
+  | 'ok'
+  | 'paused'
+  | 'no_device'
+  | 'auth_error'
+  | 'premium_required'
+  | 'rate_limited'
+  | 'error'
+
+/** Último estado leído de Spotify (R-SYNC). */
+export type PlaybackState = {
+  isPlaying: boolean
+  item: PlayerItem | null
+  progressMs: number
+  /** Momento en que se leyó `progressMs`; el navegador interpola desde ahí. */
+  observedAt: number
+  deviceName: string | null
+  syncStatus: SyncStatus
+  lastError: string | null
 }
 
 /** Canción pendiente con sus votos y su posición en la cola (R-COLA-01). */
@@ -56,6 +86,12 @@ export type SessionState = {
   trackSeq: number
   /** R-COLA-03: sube con cada cambio de la cola. */
   queueVersion: number
+  /** R-SYNC-01: como máximo una enviada a Spotify y una sonando. */
+  queuedTrackId: string | null
+  playingTrackId: string | null
+  /** Dispositivo elegido por el anfitrión (null = el activo en Spotify). */
+  deviceId: string | null
+  playback: PlaybackState
 }
 
 export type CreateSessionInput = { hostSpotifyId: string; name: string; market: string }
@@ -100,6 +136,18 @@ export interface SessionStore {
   votedTrackIds(sessionId: string, participantId: string): string[]
   /** R-CAN-06: el anfitrión quita una canción pendiente. */
   removeTrack(sessionId: string, trackId: string): Track
+  /** R-SYNC-01/02: la primera de la cola pasa a "Sigue" (ya no se vota). null si no hay. */
+  takeNext(sessionId: string): Track | null
+  /** Si Spotify no la aceptó, vuelve a la cola con sus votos y su antigüedad. */
+  returnToQueue(sessionId: string, trackId: string): void
+  /** Spotify empezó a sonarla: la anterior que sonaba pasa a `played`. */
+  markPlaying(sessionId: string, trackId: string): void
+  /** Lo que sonaba de la cola terminó o el anfitrión cambió de canción. */
+  finishPlaying(sessionId: string): void
+  /** La enviada a Spotify nunca sonó (el anfitrión la saltó o vació su cola). */
+  skipQueued(sessionId: string): void
+  setPlayback(sessionId: string, playback: Partial<PlaybackState>): PlaybackState
+  setDevice(sessionId: string, deviceId: string | null): void
   /** Borra sesiones vencidas (§2.3) y devuelve cuántas borró. */
   sweep(): number
 }
@@ -146,6 +194,18 @@ export class MemoryStore implements SessionStore {
       votes: new Map(),
       trackSeq: 0,
       queueVersion: 0,
+      queuedTrackId: null,
+      playingTrackId: null,
+      deviceId: null,
+      playback: {
+        isPlaying: false,
+        item: null,
+        progressMs: 0,
+        observedAt: this.now(),
+        deviceName: null,
+        syncStatus: 'idle',
+        lastError: null,
+      },
     }
     this.sessions.set(session.id, session)
     this.codes.set(session.code, { sessionId: session.id, retired: false })
@@ -244,6 +304,9 @@ export class MemoryStore implements SessionStore {
       status: 'pending',
       createdAt: this.now(),
       seq: session.trackSeq,
+      queuedAt: null,
+      startedAt: null,
+      finishedAt: null,
     }
     session.tracks.set(track.id, track)
     session.activeBySpotifyId.set(track.spotifyTrackId, track.id)
@@ -301,6 +364,71 @@ export class MemoryStore implements SessionStore {
     return track
   }
 
+  takeNext(sessionId: string): Track | null {
+    const session = this.activeSession(sessionId)
+    if (session.queuedTrackId) return null
+    const top = this.queue(sessionId)[0]
+    if (!top) return null
+    const track = session.tracks.get(top.id)!
+    track.status = 'queued'
+    track.queuedAt = this.now()
+    session.queuedTrackId = track.id
+    session.queueVersion += 1
+    return track
+  }
+
+  returnToQueue(sessionId: string, trackId: string): void {
+    const session = this.sessions.get(sessionId)
+    const track = session?.tracks.get(trackId)
+    if (!session || !track || track.status !== 'queued') return
+    track.status = 'pending'
+    track.queuedAt = null
+    session.queuedTrackId = null
+    session.queueVersion += 1
+  }
+
+  markPlaying(sessionId: string, trackId: string): void {
+    const session = this.sessions.get(sessionId)
+    const track = session?.tracks.get(trackId)
+    if (!session || !track) return
+    if (session.playingTrackId && session.playingTrackId !== trackId) this.finishPlaying(sessionId)
+    if (track.status === 'pending') {
+      // Arranque manual con la primera de la cola: sale de la cola de votos.
+      session.queueVersion += 1
+    }
+    if (session.queuedTrackId === trackId) session.queuedTrackId = null
+    track.status = 'playing'
+    track.startedAt = this.now()
+    session.playingTrackId = trackId
+  }
+
+  finishPlaying(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    const track = session?.playingTrackId ? session.tracks.get(session.playingTrackId) : undefined
+    if (!session || !track) return
+    this.close(session, track, 'played')
+    session.playingTrackId = null
+  }
+
+  skipQueued(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    const track = session?.queuedTrackId ? session.tracks.get(session.queuedTrackId) : undefined
+    if (!session || !track) return
+    this.close(session, track, 'skipped')
+    session.queuedTrackId = null
+  }
+
+  setPlayback(sessionId: string, playback: Partial<PlaybackState>): PlaybackState {
+    const session = this.sessions.get(sessionId)
+    if (!session) throw new AppError(404, 'SESSION_NOT_FOUND', 'La sesión no existe.')
+    session.playback = { ...session.playback, ...playback }
+    return session.playback
+  }
+
+  setDevice(sessionId: string, deviceId: string | null): void {
+    this.activeSession(sessionId).deviceId = deviceId
+  }
+
   sweep(): number {
     const now = this.now()
     let removed = 0
@@ -325,6 +453,15 @@ export class MemoryStore implements SessionStore {
       throw new AppError(409, 'SESSION_ENDED', 'La sesión terminó.')
     }
     return session
+  }
+
+  /** D-6: una canción que ya sonó (o se saltó) se puede volver a pedir. */
+  private close(session: SessionState, track: Track, status: 'played' | 'skipped') {
+    track.status = status
+    track.finishedAt = this.now()
+    if (session.activeBySpotifyId.get(track.spotifyTrackId) === track.id) {
+      session.activeBySpotifyId.delete(track.spotifyTrackId)
+    }
   }
 
   /** R-VOT-04: solo las pendientes admiten votos o cambios. */

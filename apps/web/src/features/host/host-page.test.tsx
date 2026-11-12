@@ -222,6 +222,9 @@ describe('panel en vivo (SSE)', () => {
         session: { ...session, participantsCount: 2 },
         version: 1,
         queue: [track],
+        nowPlaying: null,
+        next: null,
+        sync: { status: 'ok', deviceName: 'Sala TV', lastError: null },
       })
     })
     return { source, fetchMock }
@@ -248,5 +251,125 @@ describe('panel en vivo (SSE)', () => {
     // El servidor avisa por SSE que la cola cambió.
     act(() => source.emit('queue.updated', { version: 2, queue: [] }))
     expect(screen.getByText('Todavía no hay canciones. Pide la primera.')).toBeInTheDocument()
+  })
+})
+
+describe('música en el panel (E5)', () => {
+  async function renderPanel(
+    sync: { status: string; deviceName: string | null; lastError: string | null },
+    nowPlaying: unknown = null,
+    route?: (url: string, init?: RequestInit) => Response | undefined,
+  ) {
+    const fetchMock = stubApi(
+      (url, init) => route?.(url, init) ?? Response.json(me({ activeSession: session })),
+    )
+    renderAt()
+    await screen.findByText('Sesión activa')
+    await waitFor(() => expect(FakeEventSource.instances).not.toHaveLength(0))
+    const source = FakeEventSource.latest()
+    act(() => {
+      source.open()
+      source.emit('snapshot', {
+        session,
+        version: 1,
+        queue: [],
+        nowPlaying,
+        next: null,
+        sync,
+      })
+    })
+    return { source, fetchMock }
+  }
+
+  const playingNow = {
+    source: 'host',
+    trackId: null,
+    name: 'Tema del anfitrión',
+    artist: 'Alguien',
+    imageUrl: null,
+    durationMs: 200_000,
+    progressMs: 1_000,
+    observedAt: new Date().toISOString(),
+    isPlaying: true,
+    addedBy: null,
+  }
+
+  it('Reproducir llama a Spotify y, mientras suena, el botón es Pausar', async () => {
+    const { source, fetchMock } = await renderPanel(
+      { status: 'idle', deviceName: null, lastError: null },
+      null,
+      (url) => (url.includes('/playback/') ? new Response(null, { status: 204 }) : undefined),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Reproducir' }))
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/playback/play'))).toBe(true)
+
+    act(() => source.emit('playback.updated', { nowPlaying: playingNow, next: null }))
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar' }))
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/playback/pause'))).toBe(true)
+  })
+
+  it('explica el estado de la conexión con Spotify', async () => {
+    const { source } = await renderPanel({ status: 'ok', deviceName: 'Sala TV', lastError: null })
+    expect(screen.getByText('Spotify conectado en Sala TV.')).toBeInTheDocument()
+    act(() =>
+      source.emit('sync.status', { status: 'no_device', deviceName: null, lastError: null }),
+    )
+    expect(screen.getByText(/Abre Spotify en el dispositivo/)).toBeInTheDocument()
+    act(() =>
+      source.emit('sync.status', { status: 'premium_required', deviceName: null, lastError: null }),
+    )
+    expect(
+      screen.getByText('El control de la música requiere Spotify Premium.'),
+    ).toBeInTheDocument()
+  })
+
+  it('muestra el error de Spotify al reproducir', async () => {
+    await renderPanel({ status: 'idle', deviceName: null, lastError: null }, null, (url) =>
+      url.endsWith('/playback/play')
+        ? Response.json(
+            {
+              error: {
+                code: 'NOTHING_TO_PLAY',
+                message: 'Agrega canciones a la cola para empezar.',
+              },
+            },
+            { status: 409 },
+          )
+        : undefined,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Reproducir' }))
+    expect(await screen.findByText('Agrega canciones a la cola para empezar.')).toBeInTheDocument()
+  })
+
+  it('elige el dispositivo donde suena la música', async () => {
+    const { fetchMock } = await renderPanel(
+      { status: 'no_device', deviceName: null, lastError: null },
+      null,
+      (url, init) => {
+        if (url.endsWith('/devices')) {
+          return Response.json({
+            devices: [
+              { id: 'd1', name: 'Sala TV', type: 'TV', isActive: false, isRestricted: false },
+              {
+                id: 'd2',
+                name: 'Celular',
+                type: 'Smartphone',
+                isActive: true,
+                isRestricted: false,
+              },
+            ],
+            selectedId: null,
+          })
+        }
+        if (url.endsWith('/device') && init?.method === 'PUT')
+          return new Response(null, { status: 204 })
+        return undefined
+      },
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Elegir dispositivo' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Sala TV/ }))
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ deviceId: 'd1' })
+    expect(screen.queryByRole('group', { name: 'Dispositivos de Spotify' })).not.toBeInTheDocument()
   })
 })

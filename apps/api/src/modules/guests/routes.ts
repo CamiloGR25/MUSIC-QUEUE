@@ -52,7 +52,7 @@ const perGuest = (max: number) => ({
 const joinRateLimit = { rateLimit: { max: 120, timeWindow: '1 minute' } }
 
 /** Eventos que reciben los invitados (el conteo de participantes es solo del panel). */
-const GUEST_EVENTS = new Set(['queue.updated', 'session.updated'])
+const GUEST_EVENTS = new Set(['queue.updated', 'session.updated', 'playback.updated'])
 
 /**
  * Cookie del invitado (R-PAR-01): token aleatorio de 256 bits, `httpOnly`. Se nombra por el id
@@ -113,6 +113,7 @@ export async function guestRoutes(app: FastifyInstance, deps: GuestDeps) {
           }
         : null,
       ...queue,
+      ...notify.playbackPayload(session.id)!,
     }
   }
 

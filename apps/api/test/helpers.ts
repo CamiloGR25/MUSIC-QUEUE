@@ -8,6 +8,7 @@ import {
   type TokenSet,
 } from '../src/providers/spotify/accounts.ts'
 import type { CatalogPage, CatalogTrack, SpotifyCatalog } from '../src/providers/spotify/catalog.ts'
+import type { Device, PlayerState, SpotifyPlayer } from '../src/providers/spotify/player.ts'
 
 export const ORIGIN = 'http://127.0.0.1:5180'
 export const HOST_ID = 'anfitrion1'
@@ -126,6 +127,70 @@ export class FakeCatalog implements SpotifyCatalog {
   }
 }
 
+/** Doble del reproductor de Spotify: estado controlable y registro de comandos. */
+export class FakePlayer implements SpotifyPlayer {
+  state: PlayerState | null = null
+  nativeQueue: string[] = []
+  deviceList: Device[] = [
+    { id: 'dev-sala', name: 'Sala TV', type: 'TV', isActive: true, isRestricted: false },
+  ]
+  calls: Array<{ command: string; args: unknown[] }> = []
+  /** Error que lanzará el próximo comando (una vez). */
+  failNext: Error | null = null
+
+  private record(command: string, ...args: unknown[]) {
+    this.calls.push({ command, args })
+    if (this.failNext) {
+      const error = this.failNext
+      this.failNext = null
+      throw error
+    }
+  }
+
+  commands(name: string) {
+    return this.calls.filter((call) => call.command === name)
+  }
+
+  async getState() {
+    this.record('getState')
+    return this.state
+  }
+  async getQueueUris() {
+    this.record('getQueueUris')
+    return this.nativeQueue
+  }
+  async addToQueue(_token: string, uri: string, deviceId?: string) {
+    this.record('addToQueue', uri, deviceId)
+    this.nativeQueue.push(uri)
+  }
+  async play(_token: string, options?: { deviceId?: string; uris?: string[] }) {
+    this.record('play', options)
+  }
+  async pause() {
+    this.record('pause')
+  }
+  async next() {
+    this.record('next')
+  }
+  async devices() {
+    this.record('devices')
+    return this.deviceList
+  }
+  async transfer(_token: string, deviceId: string) {
+    this.record('transfer', deviceId)
+  }
+
+  /** Suena `uri` en el dispositivo de la sala. */
+  playing(uri: string, progressMs: number, durationMs = 200_000, isPlaying = true) {
+    this.state = {
+      isPlaying,
+      progressMs,
+      item: { uri, name: `Tema ${uri}`, artist: 'Artista', imageUrl: null, durationMs },
+      device: { id: 'dev-sala', name: 'Sala TV' },
+    }
+  }
+}
+
 export async function testApp(
   options: {
     webDistDir?: string | null
@@ -133,20 +198,23 @@ export async function testApp(
     accounts?: FakeAccounts
     env?: Record<string, string>
     catalog?: FakeCatalog
+    player?: FakePlayer
     ping?: () => Promise<void>
   } = {},
 ) {
   const clock = options.clock ?? new Clock()
   const accounts = options.accounts ?? new FakeAccounts(clock)
   const catalog = options.catalog ?? new FakeCatalog()
+  const player = options.player ?? new FakePlayer()
   const app = await buildApp(testConfig(options.webDistDir ?? null, options.env), {
     logger: false,
     accounts,
     catalog,
+    player,
     now: clock.now,
     ping: options.ping ?? (async () => {}),
   })
-  return { app, clock, accounts, catalog }
+  return { app, clock, accounts, catalog, player }
 }
 
 export function cookieValue(res: LightMyRequestResponse, name: string): string | undefined {

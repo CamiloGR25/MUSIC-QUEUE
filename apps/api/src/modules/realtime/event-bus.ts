@@ -1,6 +1,11 @@
 /** Evento listo para enviar por SSE: nombre y datos ya serializables. */
 export type BusEvent = {
-  name: 'queue.updated' | 'session.updated' | 'participants.updated'
+  name:
+    | 'queue.updated'
+    | 'session.updated'
+    | 'participants.updated'
+    | 'playback.updated'
+    | 'sync.status'
   data: unknown
 }
 

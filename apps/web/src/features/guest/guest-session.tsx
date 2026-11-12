@@ -1,4 +1,5 @@
 import {
+  playbackSchema,
   queueUpdatedSchema,
   type SessionSnapshot,
   sessionSnapshotSchema,
@@ -10,6 +11,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { Button } from '../../components/button.tsx'
 import { ApiRequestError, errorMessage } from '../../lib/api-client.ts'
 import { useEventStream } from '../../lib/use-event-stream.ts'
+import { NowPlaying } from '../playback/now-playing.tsx'
 import { QueueList } from '../queue/queue-list.tsx'
 import { VoteButton } from '../queue/vote-button.tsx'
 import { SearchSheet } from '../search/search-sheet.tsx'
@@ -68,6 +70,10 @@ export function GuestSession({
       'session.updated': (data) => {
         const session = sessionUpdatedSchema.parse(data)
         update((current) => ({ ...current, session }))
+      },
+      'playback.updated': (data) => {
+        const playback = playbackSchema.parse(data)
+        update((current) => ({ ...current, ...playback }))
       },
     },
     // El canal respondió con error: si la sesión ya no existe, se dice en vez de reintentar.
@@ -139,6 +145,8 @@ export function GuestSession({
       <p role="status" className={`min-h-6 ${notice?.error ? 'text-alerta' : 'text-hoja'}`}>
         {notice?.text}
       </p>
+
+      <NowPlaying nowPlaying={snapshot.nowPlaying} next={snapshot.next} />
 
       <section className="flex flex-col gap-2" aria-labelledby="cola">
         <h2 id="cola" className="text-titulo font-bold">

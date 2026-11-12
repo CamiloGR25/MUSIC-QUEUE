@@ -1,5 +1,5 @@
-import type { QueueUpdated, SessionUpdated } from '@musica/shared'
-import { toTrackView } from '../queue/views.ts'
+import type { Playback, QueueUpdated, SessionUpdated, SyncStatusView } from '@musica/shared'
+import { toPlayback, toSyncStatus, toTrackView } from '../queue/views.ts'
 import type { SessionStore } from '../sessions/store.ts'
 import type { EventBus } from './event-bus.ts'
 
@@ -40,6 +40,28 @@ export class Notifier {
   session(sessionId: string): void {
     const data = this.sessionPayload(sessionId)
     if (data) this.bus.publish(sessionId, { name: 'session.updated', data })
+  }
+
+  playbackPayload(sessionId: string): Playback | null {
+    const session = this.sessions.findById(sessionId)
+    return session ? toPlayback(session) : null
+  }
+
+  syncPayload(sessionId: string): SyncStatusView | null {
+    const session = this.sessions.findById(sessionId)
+    return session ? toSyncStatus(session) : null
+  }
+
+  /** Cambió lo que suena, la pausa o la que sigue (E5). */
+  playback(sessionId: string): void {
+    const data = this.playbackPayload(sessionId)
+    if (data) this.bus.publish(sessionId, { name: 'playback.updated', data })
+  }
+
+  /** Estado de la conexión con Spotify, solo para el panel. */
+  sync(sessionId: string): void {
+    const data = this.syncPayload(sessionId)
+    if (data) this.bus.publish(sessionId, { name: 'sync.status', data })
   }
 
   participants(sessionId: string): void {

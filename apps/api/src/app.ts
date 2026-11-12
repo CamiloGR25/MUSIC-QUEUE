@@ -13,11 +13,14 @@ import { fixedQrRoutes } from './modules/fixed-qr/routes.ts'
 import { guestRoutes } from './modules/guests/routes.ts'
 import { hostRoutes } from './modules/host/routes.ts'
 import { KeepAwake } from './modules/keep-awake/keep-awake.ts'
+import { PlaybackControls } from './modules/playback/controls.ts'
+import { PlaybackSync } from './modules/playback/sync.ts'
 import { EventBus } from './modules/realtime/event-bus.ts'
 import { Notifier } from './modules/realtime/notifier.ts'
 import { MemoryStore, type SessionStore } from './modules/sessions/store.ts'
 import { HttpSpotifyAccounts, type SpotifyAccounts } from './providers/spotify/accounts.ts'
 import { HttpSpotifyCatalog, type SpotifyCatalog } from './providers/spotify/catalog.ts'
+import { HttpSpotifyPlayer, type SpotifyPlayer } from './providers/spotify/player.ts'
 import { healthRoutes } from './routes/health.ts'
 
 type BuildOptions = {
@@ -26,6 +29,7 @@ type BuildOptions = {
   /** Dependencias externas reemplazables en pruebas. */
   accounts?: SpotifyAccounts
   catalog?: SpotifyCatalog
+  player?: SpotifyPlayer
   now?: () => number
   /** Consulta a la URL pública que hace KeepAwake (R-AWAKE-01). */
   ping?: () => Promise<void>
@@ -35,6 +39,7 @@ export type AppServices = {
   tokens: HostTokenStore
   sessions: SessionStore
   keepAwake: KeepAwake
+  sync: PlaybackSync
   bus: EventBus
   sse: SseConnections
 }
@@ -56,7 +61,7 @@ declare module 'fastify' {
  */
 export async function buildApp(
   config: AppConfig,
-  { logger = true, accounts, catalog, now = Date.now, ping }: BuildOptions = {},
+  { logger = true, accounts, catalog, player, now = Date.now, ping }: BuildOptions = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger && {
@@ -68,10 +73,13 @@ export async function buildApp(
 
   const spotifyAccounts = accounts ?? new HttpSpotifyAccounts(config.spotify)
   const spotifyCatalog = catalog ?? new HttpSpotifyCatalog(config.spotify)
+  const spotifyPlayer = player ?? new HttpSpotifyPlayer()
   const sessions = new MemoryStore(now, config.sessionTtlHours)
   const bus = new EventBus()
+  const notify = new Notifier(sessions, bus)
+  const tokens = new HostTokenStore(spotifyAccounts, now)
   const services: AppServices = {
-    tokens: new HostTokenStore(spotifyAccounts, now),
+    tokens,
     sessions,
     bus,
     sse: new SseConnections(),
@@ -82,7 +90,23 @@ export async function buildApp(
       ping: ping ?? (() => pingHealth(config.publicBaseUrl)),
       onError: (error) => app.log.warn({ err: error }, 'KeepAwake no pudo consultar /api/health'),
     }),
+    sync: new PlaybackSync({
+      sessions,
+      tokens,
+      player: spotifyPlayer,
+      notify,
+      now,
+      leadMs: config.syncLeadMs,
+      log: app.log,
+    }),
   }
+  const controls = new PlaybackControls({
+    sessions,
+    tokens,
+    player: spotifyPlayer,
+    notify,
+    sync: services.sync,
+  })
 
   await app.register(fastifyHelmet, {
     contentSecurityPolicy: {
@@ -101,12 +125,20 @@ export async function buildApp(
   app.decorateRequest('hostAuth', null)
 
   const deps = { config, accounts: spotifyAccounts, tokens: services.tokens, now }
-  const live = { bus, notify: new Notifier(sessions, bus), sse: services.sse }
+  const live = { bus, notify, sse: services.sse }
   const api = { prefix: '/api' }
   await app.register(healthRoutes, api)
   await app.register((scope) => hostAuthRoutes(scope, deps), api)
   await app.register(
-    (scope) => hostRoutes(scope, { ...deps, ...live, sessions, keepAwake: services.keepAwake }),
+    (scope) =>
+      hostRoutes(scope, {
+        ...deps,
+        ...live,
+        sessions,
+        keepAwake: services.keepAwake,
+        sync: services.sync,
+        controls,
+      }),
     api,
   )
   await app.register(
@@ -125,6 +157,7 @@ export async function buildApp(
   app.addHook('onClose', async () => {
     clearInterval(sweeper)
     services.keepAwake.stop()
+    services.sync.stopAll()
   })
 
   if (config.webDistDir) {

@@ -1,4 +1,4 @@
-import { hostMeSchema, hostSessionSchema } from '@musica/shared'
+import { devicesResponseSchema, hostMeSchema, hostSessionSchema } from '@musica/shared'
 import { z } from 'zod'
 import { getJson, postJson, sendJson } from '../../lib/api-client.ts'
 
@@ -16,6 +16,13 @@ export const hostApi = {
   removeTrack: (sessionId: string, trackId: string) =>
     sendJson('DELETE', `/host/sessions/${sessionId}/tracks/${trackId}`, {}, nothing),
   eventsUrl: (sessionId: string) => `/api/host/sessions/${sessionId}/events`,
+  play: (sessionId: string) => postJson(`/host/sessions/${sessionId}/playback/play`, {}, nothing),
+  pause: (sessionId: string) => postJson(`/host/sessions/${sessionId}/playback/pause`, {}, nothing),
+  next: (sessionId: string) => postJson(`/host/sessions/${sessionId}/playback/next`, {}, nothing),
+  devices: (sessionId: string) =>
+    getJson(`/host/sessions/${sessionId}/devices`, devicesResponseSchema),
+  selectDevice: (sessionId: string, deviceId: string) =>
+    sendJson('PUT', `/host/sessions/${sessionId}/device`, { deviceId }, nothing),
   logout: () => postJson('/auth/logout', {}, nothing),
   disconnect: () => postJson('/auth/spotify/disconnect', {}, nothing),
 }

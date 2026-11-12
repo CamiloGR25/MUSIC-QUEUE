@@ -1,5 +1,10 @@
 import {
   hostSnapshotSchema,
+  type NowPlaying,
+  playbackSchema,
+  type SyncStatusView,
+  syncStatusSchema,
+  type UpcomingTrack,
   type HostSession,
   participantsUpdatedSchema,
   queueUpdatedSchema,
@@ -13,6 +18,7 @@ import { errorMessage } from '../../lib/api-client.ts'
 import { useEventStream } from '../../lib/use-event-stream.ts'
 import { QueueList } from '../queue/queue-list.tsx'
 import { hostApi } from './host-api.ts'
+import { PlaybackPanel } from './playback-panel.tsx'
 import { RemoveTrackButton } from './remove-track-button.tsx'
 
 type Pending = 'end' | 'rotate' | null
@@ -45,10 +51,20 @@ export function ActiveSession({
   const [copied, setCopied] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [live, setLive] = useState<{ version: number; queue: TrackView[]; guests: number }>({
+  const [live, setLive] = useState<{
+    version: number
+    queue: TrackView[]
+    guests: number
+    nowPlaying: NowPlaying
+    next: UpcomingTrack | null
+    sync: SyncStatusView
+  }>({
     version: -1,
     queue: [],
     guests: session.participantsCount,
+    nowPlaying: null,
+    next: null,
+    sync: { status: 'idle', deviceName: null, lastError: null },
   })
 
   useEffect(() => setCopied(false), [session.joinUrl])
@@ -56,11 +72,26 @@ export function ActiveSession({
   useEventStream(hostApi.eventsUrl(session.id), {
     snapshot: (data) => {
       const snap = hostSnapshotSchema.parse(data)
-      setLive({ version: snap.version, queue: snap.queue, guests: snap.session.participantsCount })
+      setLive({
+        version: snap.version,
+        queue: snap.queue,
+        guests: snap.session.participantsCount,
+        nowPlaying: snap.nowPlaying,
+        next: snap.next,
+        sync: snap.sync,
+      })
     },
     'queue.updated': (data) => {
       const { version, queue } = queueUpdatedSchema.parse(data)
       setLive((current) => (version > current.version ? { ...current, version, queue } : current))
+    },
+    'playback.updated': (data) => {
+      const playback = playbackSchema.parse(data)
+      setLive((current) => ({ ...current, ...playback }))
+    },
+    'sync.status': (data) => {
+      const sync = syncStatusSchema.parse(data)
+      setLive((current) => ({ ...current, sync }))
     },
     'participants.updated': (data) => {
       const { count } = participantsUpdatedSchema.parse(data)
@@ -100,84 +131,92 @@ export function ActiveSession({
   const guests = live.guests
 
   return (
-    <section className="flex flex-col gap-6 rounded-3xl bg-mesa p-6">
-      <div className="flex flex-col gap-1">
-        <p className="text-bombillo">Sesión activa</p>
-        <h2 className="text-seccion font-bold">{session.name}</h2>
-        <p className="text-arena">
-          {guests === 0
-            ? 'Todavía no ha entrado nadie.'
-            : `${guests} ${guests === 1 ? 'invitado' : 'invitados'}`}
-        </p>
-        {keepAwakeUntil && (
-          <p className="text-meta text-arena">
-            Servidor despierto hasta las{' '}
-            {new Date(keepAwakeUntil).toLocaleTimeString('es-CO', {
-              hour: 'numeric',
-              minute: '2-digit',
-            })}
+    <>
+      <PlaybackPanel
+        sessionId={session.id}
+        nowPlaying={live.nowPlaying}
+        next={live.next}
+        sync={live.sync}
+      />
+      <section className="flex flex-col gap-6 rounded-3xl bg-mesa p-6">
+        <div className="flex flex-col gap-1">
+          <p className="text-bombillo">Sesión activa</p>
+          <h2 className="text-seccion font-bold">{session.name}</h2>
+          <p className="text-arena">
+            {guests === 0
+              ? 'Todavía no ha entrado nadie.'
+              : `${guests} ${guests === 1 ? 'invitado' : 'invitados'}`}
           </p>
-        )}
-      </div>
-
-      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-        <QrCode
-          value={session.joinUrl}
-          label={`Código QR para entrar a ${session.name}`}
-          className="w-48"
-        />
-        <div className="flex w-full flex-col gap-3">
-          <p className="break-all text-arena">{session.joinUrl}</p>
-          <Button variant="secondary" onClick={() => void copy()}>
-            {copied ? 'Enlace copiado' : 'Copiar enlace'}
-          </Button>
-          <Button variant="secondary" onClick={() => setFullscreen(true)}>
-            Mostrar QR en pantalla completa
-          </Button>
+          {keepAwakeUntil && (
+            <p className="text-meta text-arena">
+              Servidor despierto hasta las{' '}
+              {new Date(keepAwakeUntil).toLocaleTimeString('es-CO', {
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
+            </p>
+          )}
         </div>
-      </div>
 
-      {error && <p className="text-alerta">{error}</p>}
-      {pending ? (
-        <div
-          className="flex flex-col gap-3 rounded-2xl border border-alerta/40 p-4"
-          role="alertdialog"
-        >
-          <p>{CONFIRM[pending].text}</p>
-          <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={() => setPending(null)}>
-              Cancelar
+        <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+          <QrCode
+            value={session.joinUrl}
+            label={`Código QR para entrar a ${session.name}`}
+            className="w-48"
+          />
+          <div className="flex w-full flex-col gap-3">
+            <p className="break-all text-arena">{session.joinUrl}</p>
+            <Button variant="secondary" onClick={() => void copy()}>
+              {copied ? 'Enlace copiado' : 'Copiar enlace'}
             </Button>
-            <Button variant="danger" onClick={() => void confirm()}>
-              {CONFIRM[pending].action}
+            <Button variant="secondary" onClick={() => setFullscreen(true)}>
+              Mostrar QR en pantalla completa
             </Button>
           </div>
         </div>
-      ) : (
-        <div className="flex flex-wrap gap-3">
-          <Button variant="secondary" onClick={() => setPending('rotate')}>
-            Crear enlace nuevo
-          </Button>
-          <Button variant="danger" onClick={() => setPending('end')}>
-            Finalizar sesión
-          </Button>
+
+        {error && <p className="text-alerta">{error}</p>}
+        {pending ? (
+          <div
+            className="flex flex-col gap-3 rounded-2xl border border-alerta/40 p-4"
+            role="alertdialog"
+          >
+            <p>{CONFIRM[pending].text}</p>
+            <div className="flex flex-wrap gap-3">
+              <Button variant="secondary" onClick={() => setPending(null)}>
+                Cancelar
+              </Button>
+              <Button variant="danger" onClick={() => void confirm()}>
+                {CONFIRM[pending].action}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            <Button variant="secondary" onClick={() => setPending('rotate')}>
+              Crear enlace nuevo
+            </Button>
+            <Button variant="danger" onClick={() => setPending('end')}>
+              Finalizar sesión
+            </Button>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2">
+          <h3 className="text-titulo font-bold">
+            Cola{live.queue.length > 0 ? ` (${live.queue.length})` : ''}
+          </h3>
+          <QueueList
+            queue={live.queue}
+            action={(track) => (
+              <RemoveTrackButton track={track} onRemove={() => void remove(track)} />
+            )}
+          />
         </div>
-      )}
 
-      <div className="flex flex-col gap-2">
-        <h3 className="text-titulo font-bold">
-          Cola{live.queue.length > 0 ? ` (${live.queue.length})` : ''}
-        </h3>
-        <QueueList
-          queue={live.queue}
-          action={(track) => (
-            <RemoveTrackButton track={track} onRemove={() => void remove(track)} />
-          )}
-        />
-      </div>
-
-      {fullscreen && <FullscreenQr session={session} onClose={() => setFullscreen(false)} />}
-    </section>
+        {fullscreen && <FullscreenQr session={session} onClose={() => setFullscreen(false)} />}
+      </section>
+    </>
   )
 }
 

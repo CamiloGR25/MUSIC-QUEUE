@@ -9,9 +9,9 @@ export function TrackCover({
 }: {
   src: string | null
   alt: string
-  size?: 'sm' | 'lg'
+  size?: 'sm' | 'md' | 'lg'
 }) {
-  const box = size === 'lg' ? 'size-40' : 'size-12'
+  const box = { sm: 'size-12', md: 'size-24', lg: 'size-40' }[size]
   if (!src) return <div className={`${box} shrink-0 rounded-md bg-mesa-alta`} aria-hidden="true" />
   return (
     <img

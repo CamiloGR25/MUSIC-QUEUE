@@ -3,6 +3,7 @@ import {
   type HostMe,
   type HostSession,
   type HostSnapshot,
+  selectDeviceBodySchema,
 } from '@musica/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -14,6 +15,8 @@ import { fixedJoinUrl } from '../fixed-qr/routes.ts'
 import { currentHost, registerHostGuard } from '../host-auth/host-guard.ts'
 import type { HostAuthDeps } from '../host-auth/routes.ts'
 import type { KeepAwake } from '../keep-awake/keep-awake.ts'
+import type { PlaybackControls } from '../playback/controls.ts'
+import type { PlaybackSync } from '../playback/sync.ts'
 import type { EventBus } from '../realtime/event-bus.ts'
 import type { Notifier } from '../realtime/notifier.ts'
 import type { SessionState, SessionStore } from '../sessions/store.ts'
@@ -24,6 +27,8 @@ type HostDeps = HostAuthDeps & {
   bus: EventBus
   notify: Notifier
   sse: SseConnections
+  sync: PlaybackSync
+  controls: PlaybackControls
 }
 
 const sessionParamsSchema = z.object({ id: z.uuid() })
@@ -44,7 +49,7 @@ export function toHostSession(session: SessionState, guestBaseUrl: string): Host
 
 /** Panel del anfitrión (docs/DISENO.md §4.3). Todas las rutas exigen la cookie del anfitrión. */
 export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<void> {
-  const { config, tokens, sessions, keepAwake, bus, notify, sse } = deps
+  const { config, tokens, sessions, keepAwake, bus, notify, sse, sync, controls } = deps
   registerHostGuard(app, deps)
   const view = (session: SessionState) => toHostSession(session, config.guestBaseUrl)
 
@@ -96,6 +101,7 @@ export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<
       market: config.spotify.market,
     })
     keepAwake.start()
+    sync.start(session.id)
     request.log.info({ sessionId: session.id }, 'Sesión creada')
     return reply.status(201).send(view(session))
   })
@@ -111,6 +117,7 @@ export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<
     ownSession(id, host.spotifyId)
     const ended = sessions.end(id)
     keepAwake.stop()
+    sync.stop(id)
     notify.session(id)
     request.log.info({ sessionId: id }, 'Sesión finalizada')
     return view(ended)
@@ -130,7 +137,17 @@ export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<
   const hostSnapshot = (session: SessionState): HostSnapshot => ({
     session: view(session),
     ...notify.queuePayload(session.id)!,
+    ...notify.playbackPayload(session.id)!,
+    sync: notify.syncPayload(session.id)!,
   })
+
+  /** Sesión activa del anfitrión para los controles; si terminó, 409. */
+  const activeOwn = (request: Parameters<typeof currentHost>[0]) => {
+    const { id } = parseWith(sessionParamsSchema, request.params)
+    const session = ownSession(id, currentHost(request).spotifyId)
+    if (session.status === 'ended') throw new AppError(409, 'SESSION_ENDED', 'La sesión terminó.')
+    return session
+  }
 
   app.get('/host/sessions/:id', async (request) => {
     const { id } = parseWith(sessionParamsSchema, request.params)
@@ -144,6 +161,27 @@ export async function hostRoutes(app: FastifyInstance, deps: HostDeps): Promise<
     const stream = sse.start(request, reply)
     stream.send('snapshot', hostSnapshot(session))
     stream.onClose(bus.subscribe(session.id, (event) => stream.send(event.name, event.data)))
+  })
+
+  /** Controles de la música (docs/DISENO.md §4.3). */
+  app.post('/host/sessions/:id/playback/play', async (request, reply) => {
+    await controls.play(activeOwn(request))
+    return reply.status(204).send()
+  })
+  app.post('/host/sessions/:id/playback/pause', async (request, reply) => {
+    await controls.pause(activeOwn(request))
+    return reply.status(204).send()
+  })
+  app.post('/host/sessions/:id/playback/next', async (request, reply) => {
+    await controls.next(activeOwn(request))
+    return reply.status(204).send()
+  })
+  app.get('/host/sessions/:id/devices', async (request) => controls.devices(activeOwn(request)))
+  app.put('/host/sessions/:id/device', async (request, reply) => {
+    const session = activeOwn(request)
+    const { deviceId } = parseWith(selectDeviceBodySchema, request.body)
+    await controls.selectDevice(session, deviceId)
+    return reply.status(204).send()
   })
 
   /** R-CAN-06: quitar una canción pendiente. */

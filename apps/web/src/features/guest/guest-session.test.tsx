@@ -28,6 +28,8 @@ const snapshot = (overrides: Partial<SessionSnapshot> = {}): SessionSnapshot => 
   me: { participantId: 'p1', name: 'Pipe', votedTrackIds: [] },
   version: 2,
   queue: [track(1), track(2)],
+  nowPlaying: null,
+  next: null,
   ...overrides,
 })
 
@@ -202,6 +204,30 @@ describe('tiempo real (SSE)', () => {
     const source = await renderPage()
     act(() => source.emit('snapshot', snapshot({ version: 9, queue: [track(3)] })))
     expect(names()).toEqual(['Canción 3'])
+  })
+
+  it('ve al instante lo que empieza a sonar y la que sigue', async () => {
+    stubApi(() => undefined)
+    const source = await renderPage()
+    act(() =>
+      source.emit('playback.updated', {
+        nowPlaying: {
+          source: 'queue',
+          trackId: track(1).id,
+          name: 'Canción 1',
+          artist: 'Artista 1',
+          imageUrl: null,
+          durationMs: 215_000,
+          progressMs: 0,
+          observedAt: new Date().toISOString(),
+          isPlaying: true,
+          addedBy: 'Tía Marta',
+        },
+        next: { ...track(2), position: undefined },
+      }),
+    )
+    expect(screen.getByText('Sonando ahora')).toBeInTheDocument()
+    expect(screen.getByText('Sigue')).toBeInTheDocument()
   })
 
   it('si el anfitrión finaliza la sesión, lo ve al instante', async () => {

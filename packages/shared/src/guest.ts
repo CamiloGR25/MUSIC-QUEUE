@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { nowPlayingSchema, upcomingTrackSchema } from './playback.ts'
 import { trackViewSchema } from './tracks.ts'
 
 /** R-PAR-02: apodo opcional de 1 a 24 caracteres; vacío = "Invitado N". */
@@ -15,7 +16,7 @@ export const renameBodySchema = z.object({ displayName: displayNameSchema.nullab
 
 /**
  * Instantánea de la sesión para el invitado (docs/DISENO.md §4.1). Se envía al cargar y al
- * conectarse por SSE; la reproducción se agrega en E5.
+ * conectarse por SSE.
  */
 export const sessionSnapshotSchema = z.object({
   session: z.object({
@@ -36,6 +37,9 @@ export const sessionSnapshotSchema = z.object({
   version: z.number().int().nonnegative(),
   /** Pendientes en orden (R-COLA-01). */
   queue: z.array(trackViewSchema),
+  /** Lo que suena y la que sigue (E5). */
+  nowPlaying: nowPlayingSchema,
+  next: upcomingTrackSchema.nullable(),
 })
 export type SessionSnapshot = z.infer<typeof sessionSnapshotSchema>
 

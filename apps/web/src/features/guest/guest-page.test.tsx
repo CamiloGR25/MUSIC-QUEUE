@@ -12,6 +12,8 @@ const snapshot = (overrides: Partial<SessionSnapshot> = {}): SessionSnapshot => 
   me: null,
   version: 0,
   queue: [],
+  nowPlaying: null,
+  next: null,
   ...overrides,
 })
 

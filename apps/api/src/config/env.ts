@@ -64,6 +64,8 @@ const envSchema = z.object({
   GUEST_BASE_URL: z.url().optional(),
   SESSION_TTL_HOURS: z.coerce.number().positive().default(24),
   KEEP_AWAKE_INTERVAL_MS: z.coerce.number().int().min(60_000).default(600_000),
+  /** D-14: cuánto antes del final de la canción se envía la siguiente a Spotify. */
+  SYNC_LEAD_MS: z.coerce.number().int().min(5_000).max(60_000).default(20_000),
   KEEP_AWAKE_UNTIL: z
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Formato HH:MM.')
@@ -96,6 +98,7 @@ export type AppConfig = {
   /** Orígenes aceptados en mutaciones (CSRF, docs/DISENO.md §8). */
   allowedOrigins: ReadonlySet<string>
   sessionTtlHours: number
+  syncLeadMs: number
   /** R-AWAKE-05: solo en producción. */
   keepAwake: { enabled: boolean; intervalMs: number; until: string }
 }
@@ -135,6 +138,7 @@ export function loadConfig(
     guestBaseUrl,
     allowedOrigins: new Set([publicBaseUrl, guestBaseUrl]),
     sessionTtlHours: env.SESSION_TTL_HOURS,
+    syncLeadMs: env.SYNC_LEAD_MS,
     keepAwake: {
       enabled: production,
       intervalMs: env.KEEP_AWAKE_INTERVAL_MS,

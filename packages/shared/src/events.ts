@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { hostSessionSchema } from './host.ts'
+import { nowPlayingSchema, syncStatusSchema, upcomingTrackSchema } from './playback.ts'
 import { trackViewSchema } from './tracks.ts'
 
 /**
@@ -29,6 +30,9 @@ export const hostSnapshotSchema = z.object({
   session: hostSessionSchema,
   version: z.number().int().nonnegative(),
   queue: z.array(trackViewSchema),
+  nowPlaying: nowPlayingSchema,
+  next: upcomingTrackSchema.nullable(),
+  sync: syncStatusSchema,
 })
 export type HostSnapshot = z.infer<typeof hostSnapshotSchema>
 
