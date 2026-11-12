@@ -1,0 +1,42 @@
+# Blueprint de Render: un solo servicio web (Node) que sirve la API y la página.
+# No es un sitio estático: guarda los secretos de Spotify, mantiene la cola en memoria
+# y avisa a los celulares en vivo (docs/DISENO.md §10).
+services:
+  - type: web
+    name: el-imperio-bar
+    runtime: node
+    plan: free
+    region: virginia # la más cercana a Colombia
+    branch: main
+    autoDeploy: true
+    # --include=dev: con NODE_ENV=production npm omitiría Vite y tsup, que hacen falta para compilar.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: NODE_ENV
+        value: production
+      - key: TIMEZONE
+        value: America/Bogota
+      - key: DEFAULT_MARKET
+        value: CO
+      # Despierto desde que se crea una sesión hasta las 4:00 a. m. (R-AWAKE).
+      - key: KEEP_AWAKE_INTERVAL_MS
+        value: '600000'
+      - key: KEEP_AWAKE_UNTIL
+        value: '04:00'
+      # Claves propias de producción: Render las genera (32 bytes en base64).
+      - key: TOKEN_ENCRYPTION_KEY
+        generateValue: true
+      - key: COOKIE_SECRET
+        generateValue: true
+      # Se escriben a mano en Render al crear el Blueprint (nunca en GitHub).
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: ALLOWED_HOST_SPOTIFY_IDS
+        sync: false
+      # PUBLIC_BASE_URL y SPOTIFY_REDIRECT_URI salen solas de RENDER_EXTERNAL_URL.

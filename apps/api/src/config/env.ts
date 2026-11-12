@@ -103,11 +103,30 @@ export type AppConfig = {
   keepAwake: { enabled: boolean; intervalMs: number; until: string }
 }
 
+/**
+ * En Render no hace falta escribir la URL pública ni la de retorno: Render define
+ * RENDER_EXTERNAL_URL (https://<servicio>.onrender.com) y de ahí salen las dos.
+ * Si se definen a mano, mandan las escritas.
+ */
+function withRenderDefaults(
+  source: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const publicBaseUrl = source.PUBLIC_BASE_URL || source.RENDER_EXTERNAL_URL
+  if (!publicBaseUrl) return source
+  return {
+    ...source,
+    PUBLIC_BASE_URL: publicBaseUrl,
+    SPOTIFY_REDIRECT_URI:
+      source.SPOTIFY_REDIRECT_URI ||
+      `${publicBaseUrl.replace(/\/$/, '')}/api/auth/spotify/callback`,
+  }
+}
+
 export function loadConfig(
   source: Record<string, string | undefined>,
   webDistDir: string | null,
 ): AppConfig {
-  const result = envSchema.safeParse(source)
+  const result = envSchema.safeParse(withRenderDefaults(source))
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => `  ${issue.path.join('.')}: ${issue.message}`)

@@ -44,6 +44,26 @@ describe('loadConfig', () => {
     expect(config).toMatchObject({ port: 10000, host: '0.0.0.0', secureCookies: true })
   })
 
+  it('en Render toma la URL pública y la de retorno de RENDER_EXTERNAL_URL', () => {
+    const config = load({
+      NODE_ENV: 'production',
+      PUBLIC_BASE_URL: undefined,
+      SPOTIFY_REDIRECT_URI: undefined,
+      RENDER_EXTERNAL_URL: 'https://el-imperio-bar.onrender.com',
+    })
+    expect(config.publicBaseUrl).toBe('https://el-imperio-bar.onrender.com')
+    expect(config.guestBaseUrl).toBe('https://el-imperio-bar.onrender.com')
+    expect(config.spotify.redirectUri).toBe(
+      'https://el-imperio-bar.onrender.com/api/auth/spotify/callback',
+    )
+  })
+
+  it('las URL escritas a mano mandan sobre RENDER_EXTERNAL_URL', () => {
+    const config = load({ RENDER_EXTERNAL_URL: 'https://otra.onrender.com' })
+    expect(config.publicBaseUrl).toBe(TEST_ENV.PUBLIC_BASE_URL)
+    expect(config.spotify.redirectUri).toBe(TEST_ENV.SPOTIFY_REDIRECT_URI)
+  })
+
   it('lee la lista de anfitriones permitidos separada por comas (D-16)', () => {
     const config = load({ ALLOWED_HOST_SPOTIFY_IDS: ' uno , dos ,' })
     expect([...config.allowedHostIds]).toEqual(['uno', 'dos'])
